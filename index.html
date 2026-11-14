@@ -14351,7 +14351,25 @@ function storyBlocker(gs) {
             continue;
         if (!storyReachable(gs, o))
             continue;
+        if (((gs && gs.storyLapsed) || []).includes(o.id))
+            continue; // le temps a tranché à ta place
         if (gs.currentDate >= storyDeadline(o))
+            return o;
+    }
+    return null;
+}
+// Un jalon manqué ne gèle pas la partie pour toujours : passé ce délai de
+// grâce, l'occasion est perdue — avec ce que ça coûte — et la vie reprend.
+const STORY_GRACE = 45 * 86400000;
+function storyPerime(gs) {
+    for (const o of STORY_OBJECTIVES) {
+        if (o.check(gs))
+            continue;
+        if (!storyReachable(gs, o))
+            continue;
+        if (((gs && gs.storyLapsed) || []).includes(o.id))
+            continue;
+        if (gs.currentDate > storyDeadline(o) + STORY_GRACE)
             return o;
     }
     return null;
@@ -14427,14 +14445,19 @@ const MK_CASES = [
         tag: "Ce qui s'est passé dans des foyers pour mineurs, et qui venait les week-ends.", steps: MK_ORPHAN, needEv: 140 },
 ];
 function mkCase(id) { return MK_CASES.find(c => c.id === id) || MK_CASES[0]; }
+function storyPerdu(gs, o) { return (((gs && gs.storyLapsed) || []).includes(o.id)); }
 function storyAllSettled(gs) {
-    return STORY_OBJECTIVES.every(o => o.check(gs) || !storyReachable(gs, o));
+    return STORY_OBJECTIVES.every(o => o.check(gs) || storyPerdu(gs, o) || !storyReachable(gs, o));
 }
-// L'objectif obligatoire en cours (mois ouvert, pas encore rempli)
+// L'objectif obligatoire en cours (pas encore rempli, encore atteignable, pas périmé)
 function storyPending(gs) {
     for (const o of STORY_OBJECTIVES) {
         if (o.check(gs))
             continue;
+        if (storyPerdu(gs, o))
+            continue; // l'occasion est passée : il n'est plus « en cours »
+        if (!storyReachable(gs, o))
+            continue; // ni atteignable, ni à afficher
         return o;
     }
     return null;
@@ -18164,6 +18187,262 @@ const INTERVIEW_TOPICS = [
     { id: "annonce", label: "Faire une annonce exclusive", emoji: "📣", effect: "Gros pic d'audience",
         apply: g => ({ social: 2.2, rep: 1.2, hype: true }) },
 ];
+// ─── QUI TE BAT AUX GRAMMY ──────────────────────────────────────────────────
+// Des artistes qui existent vraiment et qui sont déjà dans le casting du jeu —
+// jamais de noms inventés. Les francophones n'y figurent pas : les Grammy ne
+// sont pas leur terrain, ils ont les Victoires. Chaque vivier respecte sa
+// catégorie : un rappeur gagne la catégorie rap, pas un groupe de pop.
+// Un nom affiché vers l'identité réelle du personnage : l'after rend les
+// rencontres de la nuit aussi vraies que le reste du jeu.
+const NOM_VERS_ID = (() => { const m = {}; Object.values(CHARS).forEach(c => { if (c && c.name && c.id)
+    m[c.name] = c.id; }); return m; })();
+// ── LE DISCOURS ───────────────────────────────────────────────────────────
+// Quarante-cinq secondes de micro, et un orchestre payé pour couvrir ta voix
+// dès la quarante-sixième.
+const DISCOURS_GRAMMY = [
+    { id: "dieu", emoji: "✝️", label: "Remercier Dieu avant tout le monde",
+        dit: "« Avant de remercier qui que ce soit, je veux remercier Dieu. Ce que vous voyez là, je ne l'ai pas fabriqué seul. »",
+        suite: "La salle applaudit, polie. L'extrait tourne plus que le trophée lui-même — la moitié des gens trouve ça beau, l'autre moitié trouve ça de trop.",
+        effets: { rep: 6, fame: 3, stress: -4 }, marche: 6, mental: { purpose: 6 }, foi: true },
+    { id: "ville", emoji: "🏝️", label: "Remercier la ville qui t'a fait",
+        dit: "« Je ne suis pas sorti de nulle part. Il y a un endroit, des gens, et personne ici ne connaît leurs noms. »",
+        suite: "Ce n'est pas la phrase qu'on retiendra de la soirée. Chez toi, elle a été entendue.",
+        effets: { rep: 5, fame: 2 }, foi: false },
+    { id: "equipe", emoji: "🏷️", label: "Remercier ceux qui étaient là avant",
+        dit: "« Il y a des gens qui m'ont cru quand ça ne rapportait rien à personne de me croire. C'est leur soir autant que le mien. »",
+        suite: "Tu as cité des noms que personne dans cette salle ne connaît. Eux les ont entendus.",
+        effets: { rep: 4, fame: 2 }, equipe: true },
+    { id: "dedier", emoji: "💌", label: "Dédier le trophée à quelqu'un",
+        dit: null,
+        suite: "La caméra a cherché un visage dans la salle. Demain, tout le monde saura à qui tu parlais.",
+        effets: { rep: 3, fame: 4 }, dedier: true },
+    { id: "industrie", emoji: "🔥", label: "Prendre le micro contre l'industrie",
+        dit: "« Vous me donnez un trophée ce soir. L'année dernière, vous ne répondiez pas à mes mails. Rien n'a changé chez moi — c'est chez vous que ça a changé. »",
+        suite: "L'orchestre démarre avant ta dernière phrase. Trop tard : la séquence est déjà partout, et elle va te suivre un moment.",
+        effets: { fame: 9, rep: 5, stress: 7 }, industrie: true },
+    { id: "soi", emoji: "😤", label: "Se remercier soi-même",
+        dit: "« Je vais remercier quelqu'un que personne ne remercie jamais : moi. Personne n'y croyait, et je me suis levé tous les matins quand même. Alors merci à moi. »",
+        suite: "La salle rit à moitié. L'extrait tourne en boucle avant la fin de la soirée — c'est la phrase que tout le monde citera demain, en bien ou en mal.",
+        effets: { fame: 11, rep: -3, stress: 3 }, orgueil: true },
+    { id: "rien", emoji: "🏆", label: "Lever le trophée et sortir sans un mot",
+        dit: "(Tu lèves le trophée. Tu regardes la salle trois secondes. Tu sors.)",
+        suite: "Pas une phrase à découper, pas une citation à retourner contre toi. Les commentateurs vont parler de ça toute la semaine faute de mieux.",
+        effets: { rep: 7, fame: 4, stress: -3 } },
+];
+// Les gens contre qui tu as perdu ce soir sont au même after que toi.
+function invitesApres(result) {
+    const noms = [];
+    (result && result.results || []).forEach(r => {
+        (r.rivaux || []).forEach(n => { n.split(" & ").forEach(x => { if (NOM_VERS_ID[x] && !noms.includes(x))
+            noms.push(x); }); });
+    });
+    for (let i = noms.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [noms[i], noms[j]] = [noms[j], noms[i]];
+    }
+    return noms.slice(0, 3);
+}
+const APRES_GRAMMY = [
+    { id: "after", emoji: "🥂", label: "L'after jusqu'au matin",
+        detail: "Tout le monde y sera. Toi aussi, donc.",
+        effets: { fame: 5, energy: -24, stress: -6 }, marche: -8, rencontres: true, risque: true },
+    { id: "diner", emoji: "🍽️", label: "Un dîner à six avec ton équipe",
+        detail: "Une table au fond, personne pour filmer.",
+        effets: { energy: -8, stress: -12, rep: 1 }, equipe: true },
+    { id: "rentrer", emoji: "🌙", label: "Rentrer",
+        detail: "Le trophée sur le siège passager, et la ville qui défile.",
+        effets: { energy: 14, stress: -14 }, marche: 3 },
+];
+const GRAMMY_VIVIERS = {
+    rap: ["Kendrick Lamar", "J. Cole", "Drake", "Travis Scott", "21 Savage", "Tyler, The Creator",
+        "A$AP Rocky", "Future", "Lil Baby", "Lil Wayne", "Pusha T", "Jack Harlow", "JID",
+        "Denzel Curry", "Vince Staples", "Gunna", "Playboi Carti", "Megan Thee Stallion",
+        "Doechii", "GloRilla", "Latto", "Nicki Minaj", "Cardi B", "Central Cee", "Dave",
+        "Stormzy", "Skepta", "Baby Keem", "Earl Sweatshirt", "Freddie Gibbs", "Rod Wave",
+        "Roddy Ricch", "Lil Durk", "Big Sean", "Meek Mill", "Eminem", "Kanye West", "Snoop Dogg",
+        "Ice Spice", "Saweetie", "Westside Gunn", "Benny the Butcher", "Conway the Machine",
+        "Isaiah Rashad", "Smino", "Saba", "Cordae", "Yeat", "Ken Carson", "Lil Uzi Vert"],
+    rnb: ["SZA", "Frank Ocean", "Brent Faiyaz", "H.E.R.", "Summer Walker", "Giveon", "Daniel Caesar",
+        "Kehlani", "Jhené Aiko", "Victoria Monét", "Lucky Daye", "Muni Long", "Coco Jones",
+        "Steve Lacy", "Miguel", "Usher", "Chris Brown", "Ella Mai", "Snoh Aalegra", "Tems",
+        "Ari Lennox", "Kali Uchis", "Jorja Smith", "Masego", "Leon Bridges", "Omar Apollo",
+        "Ravyn Lenae", "Cleo Sol", "Alex Isley", "Destin Conrad", "Bryson Tiller", "6LACK",
+        "Teyana Taylor", "Tinashe", "Normani", "Khalid", "Sampha", "Michael Kiwanuka"],
+    grand: ["Beyoncé", "Taylor Swift", "Kendrick Lamar", "SZA", "Billie Eilish", "Olivia Rodrigo",
+        "Bad Bunny", "Dua Lipa", "The Weeknd", "Drake", "Rihanna", "Bruno Mars", "Ariana Grande",
+        "Post Malone", "Doja Cat", "Tyler, The Creator", "Frank Ocean", "Chappell Roan",
+        "Sabrina Carpenter", "Ed Sheeran", "Justin Bieber", "Lady Gaga", "Kanye West",
+        "Travis Scott", "Miley Cyrus", "Charli XCX", "Noah Kahan", "Zach Bryan", "Laufey",
+        "Kacey Musgraves", "Usher"],
+    live: ["Beyoncé", "Taylor Swift", "The Weeknd", "Kendrick Lamar", "Bad Bunny", "Travis Scott",
+        "Bruno Mars", "Lady Gaga", "Rihanna", "Stormzy", "Dave", "Billie Eilish", "Usher",
+        "Chris Brown", "Drake", "SZA", "Doja Cat", "Tyler, The Creator", "Justin Timberlake",
+        "Jennifer Lopez", "Madonna", "Snoop Dogg", "Megan Thee Stallion"],
+    homme: ["Kendrick Lamar", "Drake", "The Weeknd", "Bad Bunny", "Travis Scott", "J. Cole",
+        "Tyler, The Creator", "Frank Ocean", "Bruno Mars", "Post Malone", "Usher", "Chris Brown",
+        "Future", "Lil Baby", "Ed Sheeran", "Justin Bieber", "Kanye West", "Central Cee", "Dave",
+        "Stormzy", "Zach Bryan", "Noah Kahan", "Benson Boone", "Khalid", "Giveon", "Brent Faiyaz",
+        "Steve Lacy", "Omar Apollo", "Miguel", "Eminem", "Snoop Dogg", "Lil Wayne"],
+};
+// Quelle famille pour quelle catégorie.
+function vivierDe(cat) {
+    if (cat === "Artiste masculin de l'Année")
+        return GRAMMY_VIVIERS.homme;
+    if (cat === "Meilleure Performance Live")
+        return GRAMMY_VIVIERS.live;
+    if (cat === "Meilleur Album R&B")
+        return GRAMMY_VIVIERS.rnb;
+    if (cat === "Meilleur Album Rap/Urbain" || cat === "Meilleure Chanson Rap" || cat === "Meilleure Performance Rap")
+        return GRAMMY_VIVIERS.rap;
+    if (cat === "Meilleure Collaboration")
+        return GRAMMY_VIVIERS.rap.concat(GRAMMY_VIVIERS.rnb);
+    return GRAMMY_VIVIERS.grand;
+}
+// Les autres nommés d'une catégorie : quatre noms de la bonne famille, et pour
+// une collaboration, des duos.
+function autresNommes(cat, deja) {
+    const vivier = vivierDe(cat).filter(n => !deja.has(n));
+    const tire = [];
+    const dispo = [...vivier];
+    const combien = cat === "Meilleure Collaboration" ? 8 : 4;
+    for (let i = 0; i < combien && dispo.length; i++)
+        tire.push(dispo.splice(Math.floor(Math.random() * dispo.length), 1)[0]);
+    if (cat === "Meilleure Collaboration") {
+        const duos = [];
+        for (let i = 0; i + 1 < tire.length; i += 2)
+            duos.push(`${tire[i]} & ${tire[i + 1]}`);
+        return duos;
+    }
+    return tire;
+}
+// L'ordre de passage d'une soirée : on ouvre sur les catégories techniques et
+// on garde l'Album de l'Année pour la fin, comme une vraie cérémonie.
+// Ces mots-là ne dépendent pas du registre : une ville reste une ville.
+const T_VILLE = ["Atlanta", "Memphis", "Houston", "Compton", "Brooklyn", "Harlem", "Detroit", "Chicago", "Oakland", "Miami",
+    "Vegas", "Phoenix", "Dallas", "Nashville", "Portland", "Seattle", "Baltimore", "Queens", "Tucson", "Savannah",
+    "New Orleans", "Long Beach", "Westside", "Eastside", "Englewood", "Inglewood", "Bankhead", "Southside"];
+const T_MOIS = ["September", "October", "November", "December", "January", "February", "March", "April", "June", "August"];
+const T_ING = ["Chasing", "Running", "Falling", "Drowning", "Burning", "Breaking", "Waiting", "Leaving", "Bleeding", "Dreaming",
+    "Praying", "Counting", "Losing", "Finding", "Holding", "Fading", "Floating", "Hunting", "Wandering", "Drifting",
+    "Crashing", "Climbing", "Digging", "Dancing", "Screaming", "Whispering", "Starving", "Healing", "Forgetting", "Remembering",
+    "Rebuilding", "Unlearning", "Outrunning", "Outgrowing", "Rewriting", "Replaying", "Collecting", "Trading", "Spending", "Saving"];
+const T_VERB = ["Stay", "Leave", "Fall", "Burn", "Break", "Forgive", "Forget", "Remember", "Surrender", "Apologize",
+    "Pretend", "Settle", "Listen", "Answer", "Return", "Belong", "Change", "Wait", "Sleep", "Beg",
+    "Kneel", "Fold", "Blink", "Speak", "Trust", "Follow", "Chase", "Hide", "Quit", "Bend"];
+const T_PERS = ["Soldier", "Stranger", "Prophet", "Sinner", "Saint", "Hustler", "Dreamer", "Outlaw", "Survivor", "Astronaut",
+    "Passenger", "Witness", "Visitor", "Driver", "Runner", "Fighter", "Believer", "Neighbor", "Brother", "Daughter",
+    "Gambler", "Preacher", "Widow", "Rookie", "Veteran", "Messenger", "Keeper", "Thief", "Liar", "Lover"];
+// Ce qui ne prend pas d'article : seul « of » les accepte au singulier.
+const T_MASSE = ["Gold", "Smoke", "Rain", "Fire", "Honey", "Leather", "Concrete", "Gasoline", "Whiskey", "Sugar",
+    "Daylight", "Thunder", "Lightning", "Water", "Dust", "Glass", "Silver", "Copper", "Velvet", "Denim"];
+const BANQUE_TITRES = {
+    rap: { n: ["Blocks", "Pressure", "Concrete", "Paranoia", "Interest", "Loyalty", "Cartier", "Overtime", "Collateral", "Smoke",
+            "Ambition", "Static", "Receipts", "Payback", "Appetite", "Vultures", "Mileage", "Sirens", "Hunger", "Backseat",
+            "Alibi", "Mirrors", "Ledger", "Pyrex", "Marble", "Barbwire", "Ransom", "Felony", "Scars", "Chains",
+            "Distance", "Habits", "Prophets", "Numbers", "Trenches", "Ego", "Hollywood", "Dividends", "Grief", "Appetite",
+            "Trophies", "Silence", "Hydra", "Brick", "Tar", "Crown", "Vendetta", "Oxygen", "Zeros", "Lions",
+            "Rust", "Fever", "Bloodline", "Patience", "Soil", "Wolves", "Monuments", "Cathedral", "Sandpaper", "Birthright",
+            "Rebuttal", "Carousel", "Shrapnel", "Lighthouse", "Amen", "Hourglass", "Checkout", "Dominoes", "Ritual", "Pigeons",
+            "Quicksand", "Gravel", "Halo", "Verdict", "Clockwork", "Pavement", "Deposition", "Co-Signer", "Burner", "Headcount",
+            "Rearview"],
+        d: ["Gold Teeth", "Static Noise", "Hollow Points", "Ghost Town", "Tunnel Vision", "Interest Rate", "Stash House", "Side Door", "Bad Paper", "Witness List",
+            "Clean Money", "Pressure Drop", "Short Fuse", "Last Resort", "Blood Money", "Dead Weight", "Night Shift", "Court Date", "Red Dot", "Cold Case",
+            "Mileage Tax", "Pawn Shop", "Dry Spell", "Open Case"],
+        a: ["Cold", "Holy", "Late", "Violent", "Quiet", "Golden", "Bitter", "Heavy", "Tragic", "Sacred", "Restless", "Ruthless", "Endless", "Private", "Crooked", "Honest", "Hollow", "Southern", "Modern", "Broken", "Sober", "Reckless", "Patient", "Ancient", "Electric", "Stolen", "Flawless", "Fearless", "Graceless", "Nameless", "Younger", "Darker", "Louder", "Wiser", "Colder", "Rare", "Blank", "Infinite", "Narrow", "Unseen", "Final", "Unholy", "Feral", "Lucid", "Jagged", "Stubborn", "Vicious", "Savage", "Shallow", "Secondhand", "Bulletproof", "Overgrown", "Unwritten", "Crooked"] },
+    rnb: { n: ["Velvet", "Midnight", "Satin", "Bodies", "Lovers", "Tides", "Honey", "Silk", "Afterglow", "Embers",
+            "Perfume", "Candlelight", "Pillows", "Distance", "Skin", "Devotion", "Mornings", "Marrow", "Sugar", "Nectar",
+            "Lavender", "Sunday", "Pulse", "Aftercare", "Heatwave", "Linen", "Gardenia", "Whisper", "Unkind", "Orbit",
+            "Twilight", "Static", "Bruises", "Porcelain", "Saturn", "Tenderness", "Hunger", "Amber", "Saltwater", "Peaches",
+            "Lust", "Nocturne", "Driftwood", "Rosewater", "Ceilings", "Sirens", "Cashmere", "Marigold", "Appetite", "Comfort",
+            "Nightcap", "Mirage", "Opal", "Sapphire", "Solitude", "Tangerine", "Undertow", "Velour", "Afterthought", "Clementine",
+            "Daydream", "Eclipse"],
+        d: ["Slow Motion", "Smoke Signals", "Hotel Rooms", "Glass House", "Cocoa Butter", "Low Tide", "Fever Dream", "Bedroom Floor", "Satin Hours", "Second Wind",
+            "Slow Burn", "Soft Landing", "Night Swim", "Open Window", "Warm Front", "Last Call", "Quiet Part", "Long Drive", "Spare Key", "Front Porch",
+            "Back Road", "Low Light", "Blue Hour", "Still Water"],
+        a: ["Slow", "Tender", "Quiet", "Golden", "Blue", "Naked", "Warm", "Lonely", "Soft", "Electric", "Bitter", "Sweeter", "Patient", "Lucid", "Dizzy", "Heavy", "Reckless", "Honest", "Secret", "Sacred", "Restless", "Barefoot", "Faithless", "Weightless", "Shameless", "Nameless", "Hazy", "Low", "Afterhours", "Sober", "Tipsy", "Gentle", "Unspoken", "Velvet", "Violet", "Wild", "Younger", "Endless", "Fragile", "Bare", "Sunlit", "Stormy", "Barefoot", "Timeless", "Familiar", "Distant", "Ordinary", "Tender", "Steady", "Gentle"] },
+    grand: { n: ["Horizons", "Anthem", "Daylight", "Fireworks", "Wildfire", "Thunder", "Cathedral", "Lighthouse", "Atlas", "Monuments",
+            "Constellations", "Gravity", "Echoes", "Threshold", "Sunrise", "Compass", "Nightfall", "Harbour", "Embers", "Avalanche",
+            "Glasshouse", "Orchards", "Signal", "Altitude", "Meridian", "Driftwood", "Cartography", "Lanterns", "Overture", "Pilgrim",
+            "Riverbed", "Saltwater", "Skyline", "Static", "Tidal", "Undertow", "Vertigo", "Wilderness", "Afterglow", "Blueprint",
+            "Cinders", "Equator", "Foxglove", "Glacier", "Homecoming", "Inertia", "Kerosene", "Landslide", "Magnolia", "Northbound",
+            "Orbit", "Parallel", "Quietus", "Radiance", "Sanctuary", "Terraform", "Undercurrent", "Voltage", "Watercolour", "Youthquake",
+            "Zenith", "Bellwether", "Cascade", "Daybreak", "Everest"],
+        d: ["Paper Planes", "Open Water", "Paper Crowns", "Breaking Light", "Dial Tone", "Long Way Home", "High Ground", "Open Road", "First Light", "Wide Angle",
+            "Common Ground", "Slow Exposure", "Paper Maps", "Low Orbit", "Night Train", "Salt Flats", "Great Plains", "Clear Sky", "Deep End", "Far Side"],
+        a: ["Brave", "Distant", "Golden", "Endless", "Quiet", "Bright", "Hollow", "Modern", "Wild", "Fearless", "Restless", "Weightless", "Patient", "Ancient", "Electric", "Ordinary", "Infinite", "Rare", "Honest", "Stubborn", "Tender", "Unfinished", "Northern", "Southern", "Nameless", "Younger", "Unseen", "Lucid", "Boundless", "Static", "Luminous", "Fragile", "Reckless", "Wandering", "Final", "Feral", "Silent", "Sacred", "Blank", "Open", "Crimson", "Frozen", "Burning", "Sunlit", "Stormy", "Barefoot", "Unfinished", "Secondhand", "Bulletproof", "Priceless"] }
+};
+const PATRONS_TITRES = {
+    // Les patrons les plus courts sont répétés : le tirage est uniforme, c'est la
+    // répétition qui donne le poids. Visé : un mot souvent, deux mots souvent,
+    // trois mots rarement, jamais plus.
+    album: ["{N}", "{N}", "{N}", "{N}", "{N}", "{N}", "{N}", "{A} {N}", "{A} {N}", "{A} {N}",
+        "{A} {N}", "The {N}", "The {N}", "{N} II", "{N} II", "{N} Theory", "{N} Season", "No {N}",
+        "{D}", "{D}", "{D}", "{G} {N}", "{C} {N}", "{A}", "{A}",
+        "{N}, Vol. {V}", "{N} & {N2}", "{C}, {MO}", "{G} {C}", "The {A} {N}"],
+    chanson: ["{N}", "{N}", "{N}", "{N}", "{N}", "{N}", "{N}", "{A} {N}", "{A} {N}", "{A} {N}",
+        "{A} {N}", "{N} Again", "{N} Again", "{N} Tonight", "No {N}", "{N} Season", "{P} Interlude",
+        "{D}", "{D}", "{D}", "{G} {N}", "{C} {N}", "{A} {P}", "{N} ({A})",
+        "The {A} {N}", "{N} & {N2}", "Back to {C}", "{G} in {C}", "{W} for Me", "{N}", "{A} {N}"]
+};
+// Un titre tiré de la banque : des dizaines de milliers de combinaisons, mais
+// toujours la même pour un artiste donné une année donnée — un projet ne change
+// pas de nom entre deux catégories.
+function hachTitre(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+} return h >>> 0; }
+function registreArtiste(nom) {
+    const n = String(nom).split(" & ")[0];
+    if ((GRAMMY_VIVIERS.rap || []).includes(n))
+        return "rap";
+    if ((GRAMMY_VIVIERS.rnb || []).includes(n))
+        return "rnb";
+    return "grand";
+}
+function typeTitre(cat) {
+    if (GRAMMY_ALBUM_CATS.has(cat))
+        return "album";
+    if (GRAMMY_SONG_CATS.has(cat) || cat === "Meilleure Performance Live")
+        return "chanson";
+    return null;
+}
+function titreProjet(nom, cat, annee) {
+    const type = typeTitre(cat);
+    if (!type || !nom)
+        return null;
+    const reg = registreArtiste(nom);
+    const B = BANQUE_TITRES[reg] || BANQUE_TITRES.grand;
+    const P = PATRONS_TITRES[type];
+    const h = hachTitre(`${nom}|${type}|${annee}`);
+    const tire = (t, d) => t[(h >>> d) % t.length];
+    return P[h % P.length]
+        .replace("{N2}", tire(B.n, 13))
+        .replace("{N}", tire(B.n, 5))
+        .replace("{A}", tire(B.a, 19))
+        .replace("{V}", String(2 + ((h >>> 25) % 3)))
+        .replace("{C}", tire(T_VILLE, 7))
+        .replace("{MO}", tire(T_MOIS, 11))
+        .replace("{D}", tire(B.d, 27))
+        .replace("{G}", tire(T_ING, 17))
+        .replace("{W}", tire(T_VERB, 23))
+        .replace("{P}", tire(T_PERS, 3))
+        .replace("{X}", tire(T_MASSE, 9));
+}
+const GRAMMY_RANG = {
+    "Meilleure Performance Live": 1, "Meilleure Performance Rap": 2, "Meilleure Collaboration": 3,
+    "Meilleur Album R&B": 4, "Meilleure Chanson Rap": 5, "Meilleur Album Rap/Urbain": 6,
+    "Chanson de l'Année": 7, "Artiste masculin de l'Année": 8, "Album de l'Année": 9,
+};
+// Ce que la salle pense de tes chances, dit sans chiffre.
+function ambianceGrammy(cote) {
+    if (cote >= 0.34)
+        return { t: "La salle te donne favori.", c: "#7ce0a4" };
+    if (cote >= 0.20)
+        return { t: "Les pronostics hésitent entre toi et un autre.", c: "#f2c379" };
+    if (cote >= 0.09)
+        return { t: "Tu n'es pas le favori, mais personne ne t'écarte.", c: "#e8963c" };
+    return { t: "Personne ici ne t'attend.", c: "#f0756a" };
+}
 const GRAMMY_CATEGORIES = [
     "Album de l'Année", "Chanson de l'Année",
     "Meilleur Album Rap/Urbain", "Meilleure Chanson Rap", "Meilleure Performance Rap",
@@ -18294,19 +18573,29 @@ function scoreTrack(t) {
     const legendary = hasLegendaryFeat(t);
     return Math.min(100, (t.quality || 60) * 0.7 + Math.min(24, Math.log10(1 + t.streams) * 4) + (legendary ? 8 : 0));
 }
+// Qui est dans la salle, et qui repart avec le trophée. On ne tire des
+// adversaires que pour les catégories où tu es nommé : ailleurs la soirée ne te
+// regarde pas. Personne ne rafle plus de deux prix dans la nuit — une razzia
+// rendrait la défaite anecdotique.
+function garnirCeremonie(results) {
+    const sacres = {};
+    return results.map(r => {
+        if (!r.nominated)
+            return r;
+        const bloques = new Set(Object.keys(sacres).filter(n => sacres[n] >= 2));
+        const rivaux = autresNommes(r.category, bloques);
+        if (r.youWon)
+            return { ...r, rivaux, cote: r.cote === undefined ? 0.3 : r.cote };
+        const gagnant = rivaux.length ? rivaux[Math.floor(Math.random() * rivaux.length)] : null;
+        if (gagnant)
+            gagnant.split(" & ").forEach(n => { sacres[n] = (sacres[n] || 0) + 1; });
+        return { ...r, rivaux, gagnant, cote: r.cote === undefined ? 0.12 : r.cote };
+    });
+}
 function runGrammyCeremony(gs) {
     const year = new Date(gs.currentDate).getFullYear();
     const alreadyRevelation = (gs.revelationWon || (gs.grammyHistory || []).some(g => g.results.some(r => r.category === REVELATION_CAT && r.youWon))
         || (gs.vdlmHistory || []).some(v => v.results.some(r => r.category === REVELATION_CAT && r.youWon)));
-    // Cérémonie 2024 scriptée : les deux premiers Grammy de Fisco
-    if (year === 2024) {
-        const results = GRAMMY_CATEGORIES.map(cat => {
-            if (Object.prototype.hasOwnProperty.call(GRAMMY_2024_SCRIPT, cat))
-                return { category: cat, nominated: true, projectTitle: GRAMMY_2024_SCRIPT[cat], youWon: true };
-            return { category: cat, nominated: Math.random() < 0.3, projectTitle: null, youWon: false };
-        });
-        return { year, results, winsCount: results.filter(r => r.youWon).length, project: "#0000ff" };
-    }
     const oneYearAgo = gs.currentDate - 365 * 86400000;
     const eligibleProjects = (gs.discography || []).filter(d => d.releaseDate && d.releaseDate >= oneYearAgo);
     const eligibleAlbums = eligibleProjects.filter(d => d.type === "album" || d.type === "EP");
@@ -18315,6 +18604,23 @@ function runGrammyCeremony(gs) {
     const bestTrack = eligibleTracks.length ? eligibleTracks.reduce((a, b) => scoreTrack(a) >= scoreTrack(b) ? a : b) : null;
     const bestCollabTrack = eligibleTracks.filter(t => getFeatIds(t).length).length
         ? eligibleTracks.filter(t => getFeatIds(t).length).reduce((a, b) => scoreTrack(a) >= scoreTrack(b) ? a : b) : bestTrack;
+    // Cérémonie 2024 scriptée : les deux premiers Grammy de Fisco.
+    // Une nomination hors script n'existe que si un vrai projet peut la porter :
+    // on n'est jamais nommé pour quelque chose qui n'a pas de nom.
+    if (year === 2024) {
+        const results = GRAMMY_CATEGORIES.map(cat => {
+            if (Object.prototype.hasOwnProperty.call(GRAMMY_2024_SCRIPT, cat))
+                return { category: cat, nominated: true, projectTitle: GRAMMY_2024_SCRIPT[cat], youWon: true };
+            const estArtiste = cat === "Artiste masculin de l'Année" || cat === REVELATION_CAT;
+            const porteur = estArtiste ? null : (GRAMMY_ALBUM_CATS.has(cat) ? bestAlbum : bestTrack);
+            if (!estArtiste && !porteur)
+                return { category: cat, nominated: false, projectTitle: null, youWon: false };
+            return { category: cat, nominated: Math.random() < 0.3,
+                projectTitle: porteur ? (porteur.title || porteur.parentTitle || null) : null, youWon: false };
+        });
+        const garnis = garnirCeremonie(results);
+        return { year, results: garnis, winsCount: garnis.filter(r => r.youWon).length, project: "#0000ff" };
+    }
     let results = GRAMMY_CATEGORIES.map(cat => {
         // La révélation ne peut être remportée qu'une seule fois dans une carrière
         if (cat === REVELATION_CAT && alreadyRevelation)
@@ -18334,7 +18640,7 @@ function runGrammyCeremony(gs) {
         // Gagner un Grammy reste exceptionnel
         const winChance = candidate ? Math.max(0.015, Math.min(gs.elite ? 0.42 : 0.16, (yourScore - 74) / 210 + (gs.elite ? 0.16 : 0))) : 0;
         const youWon = candidate ? Math.random() < winChance : false;
-        return { category: cat, nominated: !!candidate, projectTitle: candidateTitle, youWon };
+        return { category: cat, nominated: !!candidate, projectTitle: candidateTitle, youWon, cote: winChance };
     });
     // ── Les catégories achetées au cercle : le vote est simplement connu à l'avance ──
     // Chaque commande porte le projet choisi au moment de l'achat.
@@ -18355,6 +18661,7 @@ function runGrammyCeremony(gs) {
         const keep = new Set(wins.sort(() => Math.random() - 0.5).slice(0, 2).map(r => r.category));
         results = results.map(r => (r.youWon && !r.bought && !keep.has(r.category)) ? { ...r, youWon: false } : r);
     }
+    results = garnirCeremonie(results);
     const winsCount = results.filter(r => r.youWon).length;
     return { year, results, project: bestAlbum ? bestAlbum.title : (bestTrack ? bestTrack.title : null), winsCount };
 }
@@ -18745,6 +19052,11 @@ const QUICK_ACTIONS = {
 const COUT_SPIRITUEL_NUIT = {
     "After": -8, "Soirée villa": -7, "Club Azure": -5, "VIP": -5, "Rooftop": -3, "Bahasco shot": -2,
 };
+function moitieAudience(gs) {
+    const cuts = {};
+    Object.entries((gs && gs.social) || {}).forEach(([k, v]) => { cuts[k] = -Math.round(((v && v.followers) || 0) * 0.5); });
+    return cuts;
+}
 function coutNuit(gs, label) {
     if (!gs || !gs.faithDone)
         return 0;
@@ -19268,7 +19580,7 @@ const INIT = {
     deathAge: null, lastDeathWarning: null, lastCriticalWarning: null,
     deceased: [], lastDeathCheckYear: null,
     casinoBiggestWin: 0, casinoBestMult: 0, casinoTotalLost: 0, wasDeepOverdraft: false,
-    squadCheckYear: null, lastTaxYear: null, history: [], staff: [], inflation: 1, pendingRollout: null, activeCrisis: null, lastCrisisYear: null, lastInflYear: null, answeredQuestions: {}, mediaYear: null, mediaThisYear: 0, playerGen: 0, extraPlayers: [], clubCollapsed: false, pressMemory: { scandals: 0, integrity: 0, broken: 0, generous: 0, lastDossier: null }, vdlmHistory: [VDLM_2022], lastVdlmYear: null, revelationWon: true, lastHelpTs: null, lastHelpDate: null,
+    storyLapsed: [], squadCheckYear: null, lastTaxYear: null, history: [], staff: [], inflation: 1, pendingRollout: null, activeCrisis: null, lastCrisisYear: null, lastInflYear: null, answeredQuestions: {}, mediaYear: null, mediaThisYear: 0, playerGen: 0, extraPlayers: [], clubCollapsed: false, pressMemory: { scandals: 0, integrity: 0, broken: 0, generous: 0, lastDossier: null }, vdlmHistory: [VDLM_2022], lastVdlmYear: null, revelationWon: true, lastHelpTs: null, lastHelpDate: null,
     foh0ThisYear: 0, foh0Year: null, drinksThisYear: 0, drinksYear: null,
     inPrison: false, prisonUntil: null, prisonReason: null,
     majorEventsSeen: [], lastMajorYear: null, majorThisYear: 0, majorQuotaYear: null, majorQuota: 0,
@@ -19411,7 +19723,7 @@ function capFame(next) {
 // s'en approcher.
 // Affichée dans les paramètres : elle dit d'un coup d'œil si la partie tourne
 // bien sur la dernière version du jeu.
-const VERSION_JEU = "96";
+const VERSION_JEU = "103";
 // Le seuil à partir duquel une fortune commence à se défendre au lieu de croître
 const SEUIL_GRANDE_FORTUNE = 3000000000;
 const TAUX_FROTTEMENT = 0.34; // par an sur la part au-dessus du seuil, et ça s'accélère
@@ -20582,6 +20894,16 @@ function gameReducerInner(state, action) {
             return state.membreDepuis ? state : { ...state, membreDepuis: state.currentDate };
         case "GROSSESSE_CERCLE":
             return { ...state, grossesseCercle: action.due ? { mere: action.mere, due: action.due, annonceAt: state.currentDate } : null };
+        // Droit au soir des Grammy : on pose la date sur le 4 février suivant et on
+        // rouvre la cérémonie de cette année-là.
+        case "CHEAT_GRAMMY": {
+            const d = new Date(state.currentDate);
+            const cible = new Date(d.getFullYear(), 1, 4, 19, 30, 0);
+            if (cible.getTime() <= state.currentDate)
+                cible.setFullYear(d.getFullYear() + 1);
+            return { ...state, currentDate: cible.getTime(), lastGrammyYear: null,
+                careerYears: (state.careerYears || 0) + (cible.getFullYear() - d.getFullYear()) };
+        }
         case "CHEAT_BAPTEME": {
             // Tout le chemin de la foi d'un seul coup : les cent quatre-vingt-quinze
             // jours, les cinq étapes avec leurs effets réels, la sortie du cercle avec
@@ -21488,6 +21810,14 @@ function gameReducerInner(state, action) {
                 stress: Math.max(0, Math.min(100, state.stress + 12)),
                 seriesography: newSeries,
             };
+        }
+        case "STORY_LAPSE": {
+            if ((state.storyLapsed || []).includes(action.id))
+                return state;
+            return { ...state,
+                storyLapsed: [...(state.storyLapsed || []), action.id],
+                rep: Math.max(0, state.rep - (action.rep || 0)),
+                stress: Math.min(100, state.stress + 8) };
         }
         case "RECORD_GRAMMY":
             return { ...state,
@@ -22628,6 +22958,23 @@ function FiscoGame() {
     const [savedData, setSavedData] = (0, react_1.useState)(null);
     const [ending, setEnding] = (0, react_1.useState)(null);
     const [grammyResult, setGrammyResult] = (0, react_1.useState)(null);
+    const [grammyEtape, setGrammyEtape] = (0, react_1.useState)("intro");
+    const [grammyIdx, setGrammyIdx] = (0, react_1.useState)(0);
+    const [grammyOuvert, setGrammyOuvert] = (0, react_1.useState)(false);
+    const [grammySuite, setGrammySuite] = (0, react_1.useState)(null);
+    const grammyNommes = (0, react_1.useMemo)(() => {
+        if (!grammyResult)
+            return [];
+        return grammyResult.results.filter(r => r.nominated)
+            .slice().sort((a, b) => (GRAMMY_RANG[a.category] || 0) - (GRAMMY_RANG[b.category] || 0));
+    }, [grammyResult]);
+    const finirGrammy = (0, react_1.useCallback)(() => {
+        setGrammyEtape("intro");
+        setGrammyIdx(0);
+        setGrammyOuvert(false);
+        setGrammySuite(null);
+        setGrammyResult(null);
+    }, []);
     const [vdlmResult, setVdlmResult] = (0, react_1.useState)(null);
     const [yearRecap, setYearRecap] = (0, react_1.useState)(null);
     const [taxNotice, setTaxNotice] = (0, react_1.useState)(null);
@@ -22661,6 +23008,8 @@ function FiscoGame() {
     const [mourningNotice, setMourningNotice] = (0, react_1.useState)(false);
     const [skipDays, setSkipDays] = (0, react_1.useState)(0);
     const [fastYear, setFastYear] = (0, react_1.useState)(false);
+    // Un objectif déjà signalé ne réaffiche pas sa fenêtre à chaque semaine.
+    const storyAvertiRef = (0, react_1.useRef)({});
     const advanceTimeSafe = (0, react_1.useCallback)((hours) => {
         // Une date de tournée prévue ce soir doit être jouée avant toute chose
         const cd = concertDue(gsRef.current);
@@ -22668,15 +23017,18 @@ function FiscoGame() {
             toast(`🎤 Ce soir : ${cd.emoji} ${cd.name} — tu dois jouer ce concert`, "#7fb3cc");
             return;
         }
-        // Un objectif obligatoire non rempli referme le mois : plus rien n'avance
-        const sb = storyBlocker(gsRef.current);
-        if (sb) {
-            toast(`${sb.emoji} Objectif obligatoire : ${sb.title}`, "#e8963c");
-            setStoryModal(sb);
-            return;
-        }
+        // Un objectif obligatoire prévient une fois, puis laisse le temps passer :
+        // un mur permanent figeait la partie, puisque la date n'avançait plus et
+        // que l'échéance ne pouvait donc jamais être dépassée.
         if (hours <= 24) {
             dispatch({ type: "ADVANCE_TIME", hours });
+            return;
+        }
+        const sb = storyBlocker(gsRef.current);
+        if (sb && !storyAvertiRef.current[sb.id]) {
+            storyAvertiRef.current[sb.id] = true;
+            toast(`${sb.emoji} Objectif obligatoire : ${sb.title}`, "#e8963c");
+            setStoryModal(sb);
             return;
         }
         setSkipDays(Math.round(hours / 24));
@@ -23057,6 +23409,9 @@ function FiscoGame() {
                     // Les trophées commandés sont livrés : la liste repart à zéro pour l'an prochain
                     if ((gs.boughtGrammys || []).length)
                         dispatch({ type: "CLEAR_BOUGHT_GRAMMYS" });
+                    setGrammyEtape("intro");
+                    setGrammyIdx(0);
+                    setGrammyOuvert(false);
                     setGrammyResult(result);
                     addLog(`[GRAMMY ${result.year}] ${result.winsCount > 0 ? `${result.winsCount} victoire(s) !` : "Aucune victoire cette année."}`);
                 }
@@ -23076,6 +23431,22 @@ function FiscoGame() {
             }
             else {
                 setCalAlert(cal);
+            }
+        }
+        // Un jalon laissé trop longtemps en plan finit par se refermer tout seul.
+        // On ne sort pas de l'effet ici : une cérémonie prévue le même jour doit
+        // pouvoir se jouer quand même.
+        const perime = storyPerime(gs);
+        if (perime) {
+            dispatch({ type: "STORY_LAPSE", id: perime.id, rep: 12 });
+            if (perime.id === "so_weeknd")
+                dispatch({ type: "APPLY", effects: { rel: { the_weeknd: -25 } } });
+            addLog(`[JALON] ${perime.title} — l'occasion est passée`);
+            dispatch({ type: "ADD_TIMELINE", entry: { type: "objectif", emoji: perime.emoji,
+                    title: `Occasion manquée : ${perime.title}` } });
+            if (!cal && !grammyResult && !vdlmResult) {
+                setCalAlert({ emoji: perime.emoji, title: "L'occasion est passée",
+                    desc: `**${perime.title}**\n\nTu as laissé filer. Ce n'était pas une menace en l'air : le moment où ça comptait est derrière toi, et il ne reviendra pas sous cette forme.\n\nTu perds 12 points de réputation${perime.id === "so_weeknd" ? " et The Weeknd ne répond plus avec le même enthousiasme" : ""}.\n\nLa vie continue.` });
             }
         }
         const trig = (gs.pendingEvents || []).find(pe => pe.triggerDate <= gs.currentDate);
@@ -25184,6 +25555,9 @@ function FiscoGame() {
             }
             let skipped = false;
             if (grammyResult) {
+                setGrammyEtape("intro");
+                setGrammyIdx(0);
+                setGrammyOuvert(false);
                 setGrammyResult(null);
                 skipped = true;
             }
@@ -25250,8 +25624,11 @@ function FiscoGame() {
                 toast(`🎤 Ce soir : ${cDue.emoji} ${cDue.name} — tu dois jouer ce concert`, "#7fb3cc");
                 return;
             }
+            // Le jalon a déjà prévenu dans advanceTimeSafe : ici on ne fige plus rien,
+            // sinon la semaine ne s'écoulait jamais et l'échéance restait hors d'atteinte.
             const sBlock = storyBlocker(gs);
-            if (sBlock) {
+            if (sBlock && !storyAvertiRef.current[sBlock.id]) {
+                storyAvertiRef.current[sBlock.id] = true;
                 setSkipDays(0);
                 toast(`${sBlock.emoji} Objectif obligatoire : ${sBlock.title}`, "#e8963c");
                 setStoryModal(sBlock);
@@ -25854,11 +26231,7 @@ function FiscoGame() {
         addLog(`[${formatDate(gs.currentDate)}] → ${choice.text.slice(0, 50)}`);
     }, [typing, typeDone, gs, addLog]);
     const applyMajorConsequence = (0, react_1.useCallback)((code) => {
-        const halveSocial = () => {
-            const cuts = {};
-            Object.entries(gs.social).forEach(([k, v]) => { cuts[k] = -Math.round(v.followers * 0.5); });
-            return cuts;
-        };
+        const halveSocial = () => moitieAudience(gs);
         const M = {
             DRAKE_THANK: () => {
                 const notOwned = (gs.vehicles || []).filter(v => !v.owned);
@@ -27973,6 +28346,7 @@ function FiscoGame() {
         ["J'suis sur le trône j'ai viré Elie", "Laissez moi dans mon délire"],
         ["T'sais qu'on sera toujours là En haut du podium", "On mate les étoiles", "Si tu veux plus jamais nous revoir Change de vie"],
         ["Déchiré j'vois s'arrêter le temp", "J'suis pas chez moi j'ai plus trop le temp", "Entre Toronto et Paris", "T'a Kapté la vie c'est magique"],
+        ["Tu m'a dit tu voulait rester au top meuf", "Si au grammy j'suis nommé artiste de l'année", "ton cœur est une pureté"],
     ];
     const estUnCodeSecret = (0, react_1.useCallback)(txt => {
         const n = String(txt || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -28034,6 +28408,24 @@ function FiscoGame() {
             addLog("[???] Seize ans passent d'un coup");
             setAnnonceMajeure({ emoji: "⏳", title: "Le temps s'arrête, puis repart sans toi", majeur: true,
                 desc: `Tu as récité ces lignes ${(interviewOutlet === null || interviewOutlet === void 0 ? void 0 : interviewOutlet.id) === "tf1jt" ? "au journal de 20h, face à des millions de personnes qui n'ont rien remarqué" : `chez ${(interviewOutlet === null || interviewOutlet === void 0 ? void 0 : interviewOutlet.name) || "eux"}, et personne n'a rien remarqué`}.\n\nQuand tu reposes le micro, seize ans ont passé. Des gens que tu connaissais sont morts, d'autres sont nés, des joueurs que tu avais signés ont raccroché, et les enfants de tes amis donnent aujourd'hui des interviews.\n\nTu as vieilli comme les autres. Ta célébrité aussi.\n\nIl reste sept jours avant les seize ans de l'enfant que tu as signé un matin ordinaire. Tu ne sais pas encore ce qu'on en a fait. Tu le sauras dans une semaine.` });
+            return;
+        }
+        // ── Cinquième code secret : droit au soir des Grammy ──
+        // Écrit pour le plateau de Jimmy Kimmel, mais reconnu partout : un plateau
+        // déjà passé ne doit pas rendre un code inaccessible.
+        if (kind === "interview"
+            && norm(text).includes(norm("Tu m'a dit tu voulait rester au top meuf"))
+            && norm(text).includes(norm("Si au grammy j'suis nommé artiste de l'année"))) {
+            setFreeTextModal(null);
+            setFreeTextValue("");
+            const avant = new Date(gs.currentDate).getFullYear();
+            dispatch({ type: "CHEAT_GRAMMY" });
+            addLog("[???] Les mois ont défilé jusqu'au 4 février");
+            const ap = new Date(gs.currentDate);
+            const cible = new Date(ap.getFullYear(), 1, 4);
+            const annee = cible.getTime() <= gs.currentDate ? avant + 1 : avant;
+            setAnnonceMajeure({ emoji: "🏆", title: "Le soir arrive", majeur: true,
+                desc: `Tu as récité ces lignes ${(interviewOutlet === null || interviewOutlet === void 0 ? void 0 : interviewOutlet.id) === "kimmel" ? "sur le plateau de Jimmy Kimmel" : `chez ${(interviewOutlet === null || interviewOutlet === void 0 ? void 0 : interviewOutlet.name) || "eux"}`}, et le présentateur a ri sans comprendre pourquoi.\n\nLes mois qui suivent se sont refermés d'un coup. Les tournages, les sorties, les factures : tout est passé pendant que tu regardais ailleurs.\n\nIl fait nuit, tu es en voiture, et la cérémonie commence dans une demi-heure.\n\n**4 février ${annee}. C'est ce soir.**` });
             return;
         }
         // ── Quatrième code secret : tout le chemin jusqu'au baptême ──
@@ -28889,26 +29281,365 @@ function FiscoGame() {
                 react_1.default.createElement("div", { style: { fontSize: 9, color: "rgba(127,179,204,.5)", letterSpacing: 2, marginBottom: 6, fontFamily: "'Space Mono',monospace", fontVariantNumeric: "tabular-nums" } }, "MOMENTS MARQUANTS"),
                 react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 3, marginBottom: 14, maxHeight: 120, overflowY: "auto" } }, yearRecap.highlights.map((h, i) => react_1.default.createElement("div", { key: i, style: { fontSize: 10, color: "rgba(255,255,255,.5)", fontFamily: "'Space Mono',monospace", fontVariantNumeric: "tabular-nums" } }, h))))),
             react_1.default.createElement("button", { onClick: () => setYearRecap(null), style: { width: "100%", padding: "12px", background: "rgba(127,179,204,.15)", border: "1px solid rgba(127,179,204,.4)", color: "#7fb3cc", borderRadius: 8, fontFamily: "'Bebas Neue',cursive", fontSize: 16, letterSpacing: 3, cursor: "pointer" } }, "CONTINUER")))) : null;
-    const GrammyOv = grammyResult ? (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "rgba(4,9,26,.85)", backdropFilter: "blur(10px)", overflowY: "auto", padding: "20px 0" } },
-        react_1.default.createElement("div", { style: { maxWidth: 420, margin: "0 auto", background: "linear-gradient(135deg,#241a05,#1a0f2f)", border: "1px solid rgba(245,204,92,.4)", borderRadius: 14, padding: "24px 20px", animation: "eventPop .3s ease" } },
-            react_1.default.createElement("div", { style: { textAlign: "center", marginBottom: 14 } },
-                react_1.default.createElement("div", { style: { fontSize: 44 } }, "\uD83C\uDFC6"),
-                react_1.default.createElement("div", { style: { fontFamily: "'Bebas Neue',cursive", fontSize: 26, color: "#f5cc5c", letterSpacing: 2 } },
-                    "GRAMMY AWARDS ",
-                    grammyResult.year),
-                react_1.default.createElement("div", { style: { fontSize: 12, color: "rgba(255,255,255,.6)", marginTop: 4 } }, grammyResult.project ? `Projet éligible : "${grammyResult.project}"` : "Aucun projet éligible cette année."),
-                react_1.default.createElement("div", { style: { fontSize: 14, color: grammyResult.winsCount > 0 ? "#7ce0a4" : "rgba(255,255,255,.5)", marginTop: 6, fontFamily: "'Bebas Neue',cursive", letterSpacing: 1 } }, grammyResult.winsCount > 0 ? `🏅 ${grammyResult.winsCount} victoire(s) !` : "Pas de victoire cette année.")),
-            react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, grammyResult.results.map((r, i) => (react_1.default.createElement("div", { key: i, style: { background: r.youWon ? "rgba(245,204,92,.1)" : "rgba(255,255,255,.03)", border: r.youWon ? "1px solid rgba(245,204,92,.35)" : "1px solid rgba(255,255,255,.08)", borderRadius: 8, padding: "9px 12px" } },
-                react_1.default.createElement("div", { style: { fontSize: 11, color: "rgba(255,200,120,.7)", fontFamily: "'Space Mono',monospace", fontVariantNumeric: "tabular-nums" } }, r.category),
-                !r.nominated ? (react_1.default.createElement("div", { style: { fontSize: 12, color: "rgba(255,255,255,.4)", marginTop: 2, fontStyle: "italic" } }, "Non nomm\u00E9 cette ann\u00E9e")) : (react_1.default.createElement(react_1.default.Fragment, null,
-                    react_1.default.createElement("div", { style: { fontSize: 12, color: "rgba(255,255,255,.6)", marginTop: 2 } },
-                        "Nomm\u00E9 pour ",
-                        react_1.default.createElement("span", { style: { color: "#f2c379" } },
-                            "\"",
-                            r.projectTitle,
-                            "\"")),
-                    react_1.default.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginTop: 3, color: r.youWon ? "#f5cc5c" : "rgba(240,145,138,.85)" } }, r.youWon ? "🏆 Victoire !" : "❌ Défaite"))))))),
-            react_1.default.createElement("button", { onClick: () => setGrammyResult(null), style: { width: "100%", marginTop: 16, background: "rgba(245,204,92,.15)", border: "1px solid rgba(245,204,92,.4)", color: "#f5cc5c", padding: "12px", borderRadius: 8, fontFamily: "'Bebas Neue',cursive", fontSize: 16, letterSpacing: 3, cursor: "pointer" } }, "FERMER")))) : null;
+    // ─── LA NUIT DES GRAMMY ───────────────────────────────────────────────────
+    // On n'affiche plus la liste des résultats : on fait vivre la soirée. Une
+    // annonce dorée, puis une catégorie à la fois, et c'est toi qui ouvres
+    // l'enveloppe — le jeu ne te dit rien avant que tu l'aies décidé.
+    // ── LE DISCOURS, PUIS L'APRÈS ──────────────────────────────────────────
+    // Celui à qui on dédie un trophée n'est pas tiré au sort : c'est la personne
+    // qui compte le plus dans la partie en cours.
+    const dedicataireGrammy = (() => {
+        if (!gs || !gs.relations)
+            return null;
+        const partis = new Set([...(gs.deceased || []), ...(gs.erased || [])]);
+        const p = gs.romance && gs.romance.partner;
+        if (p && CHARS[p] && !partis.has(p))
+            return { id: p, nom: CHARS[p].name, amour: true };
+        const ent = Object.entries(gs.relations)
+            .filter(([k, v]) => CHARS[k] && !partis.has(k) && (((v && v.score) || 0) >= 40))
+            .sort((a, b) => (((b[1] && b[1].score) || 0) - ((a[1] && a[1].score) || 0)));
+        return ent.length ? { id: ent[0][0], nom: CHARS[ent[0][0]].name, amour: false } : null;
+    })();
+    // On ne remercie pas Dieu sur scène quand on ne marche pas avec lui :
+    // celui qui n'est pas disciple remercie l'endroit d'où il vient.
+    const discoursDispos = DISCOURS_GRAMMY.filter(d => (!d.dedier || dedicataireGrammy) && (d.foi === undefined || d.foi === !!gs.faithDone));
+    const direDiscours = d => {
+        const eff = { ...d.effets };
+        let suite = d.suite;
+        if (d.dedier && dedicataireGrammy) {
+            eff.rel = { ...(eff.rel || {}), [dedicataireGrammy.id]: 15 };
+            if (dedicataireGrammy.amour)
+                eff.romance = { [dedicataireGrammy.id]: 12 };
+        }
+        if (d.equipe) {
+            eff.rel = { ...(eff.rel || {}), falltos: 8 };
+            const n = (gs.unuhuRoster || []).length;
+            if (n)
+                eff.rep = (eff.rep || 0) + Math.min(5, n);
+        }
+        // L'orgueil au micro ne coûte rien à celui qui ne marche avec personne ;
+        // il coûte à celui qui a fait une promesse.
+        if (d.orgueil && gs.faithDone) {
+            dispatch({ type: "MARCHE", delta: -5 });
+            dispatch({ type: "MENTAL", deltas: { purpose: -3 } });
+            suite += "\n\nTu l'as dit pour la salle. En descendant les marches, tu sais très bien à qui tu n'as pas pensé.";
+        }
+        if (d.industrie && gs.elite) {
+            eff.rep = (eff.rep || 0) - 12;
+            eff.stress = (eff.stress || 0) + 8;
+            suite += "\n\nEt dans le cercle, quelqu'un a noté que tu venais de cracher sur la main qui te tient.";
+        }
+        if (d.industrie)
+            eff.deliberate = true;
+        dispatch({ type: "APPLY", effects: eff });
+        if (d.marche)
+            dispatch({ type: "MARCHE", delta: d.marche });
+        if (d.mental)
+            dispatch({ type: "MENTAL", deltas: d.mental });
+        sfx("success");
+        addLog(`[GRAMMY] Discours — ${d.label}`);
+        setGrammySuite({ titre: "CE QUE TU AS DIT", emoji: d.emoji,
+            dit: d.dedier && dedicataireGrammy
+                ? `« Ce trophée, je ne le garde pas. Il est pour ${dedicataireGrammy.nom}. ${dedicataireGrammy.amour ? "Elle sait pourquoi." : "Il sait pourquoi."} »`
+                : d.dit,
+            texte: suite, suivant: "bilan" });
+        setGrammyEtape("suite");
+    };
+    const vivreApres = a => {
+        const eff = { ...a.effets };
+        let texte = a.detail;
+        const vus = [];
+        if (a.rencontres) {
+            invitesApres(grammyResult).forEach(nom => {
+                const id = NOM_VERS_ID[nom];
+                if (!id)
+                    return;
+                vus.push(nom);
+                eff.rel = { ...(eff.rel || {}), [id]: 10 };
+            });
+            texte = vus.length
+                ? `La nuit se découpe en conversations de trois minutes. Tu as vraiment parlé à ${vus.length === 1 ? vus[0] : vus.slice(0, -1).join(", ") + " et " + vus[vus.length - 1]} — le reste, tu ne t'en souviendras pas.`
+                : "La nuit se découpe en conversations de trois minutes avec des gens dont tu ne retiendras aucun nom.";
+            if (a.risque && Math.random() < 0.35) {
+                eff.rep = (eff.rep || 0) - 6;
+                texte += "\n\nQuelqu'un a filmé quelque chose. Tu ne sais pas encore quoi, mais ça sortira.";
+                addLog("[GRAMMY] Une vidéo de l'after circule");
+            }
+        }
+        if (a.equipe) {
+            eff.rel = { ...(eff.rel || {}), falltos: 6 };
+            const ros = (gs.unuhuRoster || []).slice(0, 3).map(x => x && x.name).filter(Boolean);
+            texte = ros.length
+                ? `Six couverts, le trophée au milieu de la table. ${ros.join(", ")} — et personne pour vous demander une photo.`
+                : "Six couverts, le trophée au milieu de la table, et personne pour vous demander une photo.";
+        }
+        dispatch({ type: "APPLY", effects: eff });
+        if (a.marche) {
+            dispatch({ type: "MARCHE", delta: a.marche });
+            if (a.marche < 0 && gs.faithDone) {
+                dispatch({ type: "MENTAL", deltas: { purpose: -4 } });
+                toast(`✝️ Ta marche avec Dieu en prend un coup (${a.marche})`, "#e8963c");
+                addLog(`[FOI] After des Grammy — marche ${a.marche}`);
+            }
+        }
+        dispatch({ type: "ADVANCE_TIME", hours: a.id === "after" ? 9 : a.id === "diner" ? 3 : 2 });
+        addLog(`[GRAMMY] ${a.emoji} ${a.label}`);
+        setGrammySuite({ titre: "LA FIN DE LA NUIT", emoji: a.emoji, dit: null, texte, suivant: "fin" });
+        setGrammyEtape("suite");
+    };
+    const GrammyOv = grammyResult ? (() => {
+        const or = "#f5cc5c", orClair = "#ffe9a8";
+        const cadre = { maxWidth: 460, margin: "0 auto", borderRadius: 18, position: "relative", overflow: "hidden",
+            background: "linear-gradient(165deg,#1c1507 0%,#0d0a14 55%,#07060c 100%)",
+            border: "1px solid rgba(245,204,92,.34)",
+            boxShadow: "0 1px 0 rgba(255,233,168,.18) inset, 0 50px 110px -40px rgba(0,0,0,1)" };
+        const poussiere = (react_1.default.createElement("div", { style: { position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden" } }, [...Array(16)].map((_, i) => (react_1.default.createElement("div", { key: i, style: { position: "absolute", width: i % 4 === 0 ? 3 : 2, height: i % 4 === 0 ? 3 : 2, borderRadius: "50%",
+                background: "rgba(245,204,92,.7)", left: `${(i * 41) % 100}%`, top: `${(i * 29) % 100}%`,
+                filter: "blur(.4px)", animation: `floatY ${5 + (i % 4)}s ${(i % 5) * .6}s ease-in-out infinite`, opacity: .5 } })))));
+        const titreOr = { fontFamily: "'Bebas Neue',cursive", letterSpacing: 3,
+            background: `linear-gradient(180deg,${orClair},${or} 55%,#9a7220)`,
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" };
+        // ── L'ANNONCE ──────────────────────────────────────────────────────────
+        if (grammyEtape === "intro") {
+            return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "radial-gradient(ellipse 70% 60% at 50% 40%, rgba(60,42,8,.92), rgba(4,6,12,.97))",
+                    backdropFilter: "blur(14px)", overflowY: "auto", padding: "24px 14px", animation: "overlayIn .5s ease both" } },
+                react_1.default.createElement("div", { style: { ...cadre, padding: "30px 22px", textAlign: "center", animation: "rise .7s cubic-bezier(.2,.9,.3,1) both" } },
+                    poussiere,
+                    react_1.default.createElement("div", { style: { position: "absolute", left: 0, right: 0, top: 0, height: 1,
+                            background: "linear-gradient(90deg,transparent,rgba(255,233,168,.75),transparent)" } }),
+                    react_1.default.createElement("div", { style: { fontSize: 50, marginBottom: 6, filter: "drop-shadow(0 0 22px rgba(245,204,92,.55))" } }, "\uD83C\uDFC6"),
+                    react_1.default.createElement("div", { style: { fontFamily: "'Space Mono',monospace", fontSize: 9, letterSpacing: 4,
+                            color: "rgba(245,204,92,.6)", textTransform: "uppercase" } }, "C'est ce soir"),
+                    react_1.default.createElement("div", { style: { ...titreOr, fontSize: 40, lineHeight: 1, marginTop: 7 } }, "GRAMMY AWARDS"),
+                    react_1.default.createElement("div", { style: { ...titreOr, fontSize: 26, lineHeight: 1, marginTop: 2, opacity: .85 } }, grammyResult.year),
+                    react_1.default.createElement("div", { style: { height: 1, margin: "17px auto", width: "56%",
+                            background: "linear-gradient(90deg,transparent,rgba(245,204,92,.45),transparent)" } }),
+                    grammyNommes.length === 0 ? (react_1.default.createElement(react_1.default.Fragment, null,
+                        react_1.default.createElement("div", { style: { fontSize: 13, lineHeight: 1.7, color: "rgba(242,234,218,.72)" } },
+                            "Le carton d'invitation est arriv\u00E9. Ton nom n'est sur aucune liste de nomm\u00E9s.",
+                            react_1.default.createElement("br", null),
+                            react_1.default.createElement("br", null),
+                            "Tu peux y aller quand m\u00EAme. Beaucoup y vont pour \u00E7a."),
+                        react_1.default.createElement("button", { className: "qa-btn", onClick: finirGrammy, style: { ...studioBtnStyle, width: "100%", marginTop: 20 } }, "PASSER LA SOIR\u00C9E"))) : (react_1.default.createElement(react_1.default.Fragment, null,
+                        react_1.default.createElement("div", { style: { fontFamily: "'Bebas Neue',cursive", fontSize: 19, letterSpacing: 1.6, color: orClair } }, grammyNommes.length === 1 ? "TU ES NOMMÉ DANS UNE CATÉGORIE" : `TU ES NOMMÉ DANS ${grammyNommes.length} CATÉGORIES`),
+                        react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6, marginTop: 13, textAlign: "left" } }, grammyNommes.map((r, i) => (react_1.default.createElement("div", { key: i, style: { padding: "9px 12px", borderRadius: 10,
+                                background: "linear-gradient(90deg,rgba(245,204,92,.11),rgba(245,204,92,.03))",
+                                border: "1px solid rgba(245,204,92,.22)",
+                                animation: `slideIn .5s ${0.25 + i * 0.13}s cubic-bezier(.2,.9,.3,1) both` } },
+                            react_1.default.createElement("div", { style: { fontSize: 12.5, color: orClair, fontFamily: "'Syne',sans-serif", fontWeight: 700 } }, r.category),
+                            r.projectTitle && react_1.default.createElement("div", { style: { fontSize: 10.5, color: "rgba(242,234,218,.45)", marginTop: 2 } },
+                                "pour \u00AB ",
+                                r.projectTitle,
+                                " \u00BB"))))),
+                        react_1.default.createElement("div", { style: { fontSize: 10.5, color: "rgba(242,234,218,.4)", marginTop: 13, fontStyle: "italic" } }, "Les r\u00E9sultats ne sont connus de personne. Pas m\u00EAme de toi."),
+                        react_1.default.createElement("button", { className: "qa-btn", onClick: () => { setGrammyEtape("salle"); setGrammyIdx(0); setGrammyOuvert(false); }, style: { ...studioBtnStyle, width: "100%", marginTop: 18, fontSize: 15, padding: "13px 14px" } }, "Y ALLER"),
+                        react_1.default.createElement("button", { onClick: () => setGrammyEtape("liste"), style: { background: "none", border: "none", cursor: "pointer",
+                                color: "rgba(242,234,218,.32)", fontSize: 10, fontFamily: "'Space Mono',monospace", marginTop: 9 } }, "tout voir d'un coup"))))));
+        }
+        // ── LA LISTE, POUR QUI REJOUE ──────────────────────────────────────────
+        if (grammyEtape === "liste") {
+            return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "rgba(4,9,26,.88)", backdropFilter: "blur(10px)", overflowY: "auto", padding: "20px 14px" } },
+                react_1.default.createElement("div", { style: { ...cadre, padding: "22px 18px" } },
+                    react_1.default.createElement("div", { style: { textAlign: "center", marginBottom: 14 } },
+                        react_1.default.createElement("div", { style: { ...titreOr, fontSize: 24 } },
+                            "GRAMMY AWARDS ",
+                            grammyResult.year),
+                        react_1.default.createElement("div", { style: { fontSize: 13, marginTop: 5, fontFamily: "'Bebas Neue',cursive", letterSpacing: 1,
+                                color: grammyResult.winsCount > 0 ? "#7ce0a4" : "rgba(242,234,218,.5)" } }, grammyResult.winsCount > 0 ? `${grammyResult.winsCount} GRAMMY REMPORTÉ${grammyResult.winsCount > 1 ? "S" : ""}` : "AUCUN TROPHÉE CETTE ANNÉE")),
+                    react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 7 } }, grammyResult.results.map((r, i) => (react_1.default.createElement("div", { key: i, style: { padding: "9px 11px", borderRadius: 10,
+                            background: r.youWon ? "rgba(245,204,92,.1)" : "rgba(255,255,255,.03)",
+                            border: r.youWon ? "1px solid rgba(245,204,92,.35)" : "1px solid rgba(255,255,255,.08)" } },
+                        react_1.default.createElement("div", { style: { fontSize: 10.5, color: "rgba(245,204,92,.65)", fontFamily: "'Space Mono',monospace" } }, r.category),
+                        !r.nominated ? (react_1.default.createElement("div", { style: { fontSize: 11.5, color: "rgba(242,234,218,.35)", marginTop: 2, fontStyle: "italic" } }, "Non nomm\u00E9")) : r.youWon ? (react_1.default.createElement("div", { style: { fontSize: 13, fontWeight: 700, marginTop: 3, color: or } }, "\uD83C\uDFC6 Fisco")) : (react_1.default.createElement("div", { style: { fontSize: 12.5, marginTop: 3, color: "rgba(242,234,218,.75)" } }, r.gagnant || "—")))))),
+                    react_1.default.createElement("button", { className: "qa-btn", onClick: finirGrammy, style: { ...studioBtnStyle, width: "100%", marginTop: 16 } }, "FERMER"))));
+        }
+        // ── LE BILAN DE LA NUIT ────────────────────────────────────────────────
+        if (grammyEtape === "bilan") {
+            const g = grammyResult.winsCount;
+            return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "radial-gradient(ellipse 70% 60% at 50% 40%, rgba(60,42,8,.92), rgba(4,6,12,.97))",
+                    backdropFilter: "blur(14px)", overflowY: "auto", padding: "24px 14px" } },
+                react_1.default.createElement("div", { style: { ...cadre, padding: "28px 22px", textAlign: "center", animation: "rise .6s cubic-bezier(.2,.9,.3,1) both" } },
+                    poussiere,
+                    react_1.default.createElement("div", { style: { fontSize: 46, marginBottom: 4 } }, g > 0 ? "🏆" : "🌙"),
+                    react_1.default.createElement("div", { style: { ...titreOr, fontSize: 30, lineHeight: 1.05 } }, g >= 3 ? "UNE NUIT HISTORIQUE" : g === 2 ? "DEUX TROPHÉES" : g === 1 ? "UN GRAMMY" : "RIEN CE SOIR"),
+                    react_1.default.createElement("div", { style: { height: 1, margin: "15px auto", width: "50%",
+                            background: "linear-gradient(90deg,transparent,rgba(245,204,92,.45),transparent)" } }),
+                    react_1.default.createElement("div", { style: { fontSize: 13, lineHeight: 1.72, color: "rgba(242,234,218,.78)" } }, g > 0
+                        ? `Tu repars avec ${g === 1 ? "un trophée" : `${g} trophées`}. Demain matin, ton nom sera dans tous les titres, et ce que tu feras ensuite sera comparé à cette nuit pendant des années.`
+                        : "Tu repars les mains vides. Les caméras t'ont filmé en train d'applaudir quelqu'un d'autre, et cette image-là tournera demain.\n\nIl y aura d'autres années."),
+                    grammyNommes.length > 0 && (react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5, marginTop: 16, textAlign: "left" } }, grammyNommes.map((r, i) => (react_1.default.createElement("div", { key: i, style: { display: "flex", justifyContent: "space-between", gap: 10, padding: "7px 10px", borderRadius: 8,
+                            background: r.youWon ? "rgba(245,204,92,.1)" : "rgba(255,255,255,.025)",
+                            border: r.youWon ? "1px solid rgba(245,204,92,.3)" : "1px solid rgba(255,255,255,.06)" } },
+                        react_1.default.createElement("span", { style: { fontSize: 10.5, color: "rgba(242,234,218,.5)", fontFamily: "'Space Mono',monospace", minWidth: 0,
+                                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, r.category),
+                        react_1.default.createElement("span", { style: { fontSize: 11.5, flexShrink: 0, textAlign: "right",
+                                color: r.youWon ? or : "rgba(242,234,218,.6)", fontWeight: 700 } },
+                            r.youWon ? "Fisco" : (r.gagnant || "—"),
+                            (() => {
+                                const t = r.youWon ? r.projectTitle : titreProjet(r.gagnant, r.category, grammyResult.year);
+                                return t ? react_1.default.createElement("span", { style: { display: "block", fontSize: 9.5, fontWeight: 400, fontStyle: "italic",
+                                        color: "rgba(242,234,218,.4)" } },
+                                    "\u00AB ",
+                                    t,
+                                    " \u00BB") : null;
+                            })())))))),
+                    react_1.default.createElement("button", { className: "qa-btn", onClick: () => setGrammyEtape("apres"), style: { ...studioBtnStyle, width: "100%", marginTop: 18 } }, "QUITTER LA SALLE"))));
+        }
+        // ── LE DISCOURS ────────────────────────────────────────────────────────
+        if (grammyEtape === "discours") {
+            return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "radial-gradient(ellipse 70% 60% at 50% 40%, rgba(60,42,8,.92), rgba(4,6,12,.97))",
+                    backdropFilter: "blur(14px)", overflowY: "auto", padding: "24px 14px" } },
+                react_1.default.createElement("div", { style: { ...cadre, padding: "28px 20px", animation: "rise .6s cubic-bezier(.2,.9,.3,1) both" } },
+                    poussiere,
+                    react_1.default.createElement("div", { style: { textAlign: "center" } },
+                        react_1.default.createElement("div", { style: { fontSize: 40, marginBottom: 4, filter: "drop-shadow(0 0 20px rgba(245,204,92,.5))" } }, "\uD83C\uDFA4"),
+                        react_1.default.createElement("div", { style: { fontFamily: "'Space Mono',monospace", fontSize: 8.5, letterSpacing: 3,
+                                color: "rgba(245,204,92,.55)", textTransform: "uppercase" } }, "Le micro est ouvert"),
+                        react_1.default.createElement("div", { style: { ...titreOr, fontSize: 28, lineHeight: 1.08, marginTop: 6 } }, "QUARANTE-CINQ SECONDES"),
+                        react_1.default.createElement("div", { style: { fontSize: 12, lineHeight: 1.7, color: "rgba(242,234,218,.66)", marginTop: 10 } }, "L'orchestre est pay\u00E9 pour couvrir ta voix \u00E0 la quarante-sixi\u00E8me. Ce que tu dis maintenant, on te le ressortira pendant des ann\u00E9es.")),
+                    react_1.default.createElement("div", { style: { height: 1, margin: "17px 0",
+                            background: "linear-gradient(90deg,transparent,rgba(245,204,92,.4),transparent)" } }),
+                    react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, discoursDispos.map(d => (react_1.default.createElement("button", { key: d.id, className: "qa-btn", onClick: () => direDiscours(d), style: { display: "flex", alignItems: "center", gap: 10, textAlign: "left", width: "100%",
+                            padding: "13px 13px", borderRadius: 10, cursor: "pointer",
+                            background: "rgba(245,204,92,.055)", border: "1px solid rgba(245,204,92,.26)",
+                            boxShadow: RELIEF_HAUT, color: "rgba(242,234,218,.9)" } },
+                        react_1.default.createElement("span", { style: { fontSize: 19, flexShrink: 0 } }, d.emoji),
+                        react_1.default.createElement("span", { style: { fontSize: 12.5, lineHeight: 1.45, fontFamily: "'Syne',sans-serif", fontWeight: 700 } }, d.id === "dedier" && dedicataireGrammy ? `Dédier le trophée à ${dedicataireGrammy.nom}` : d.label))))))));
+        }
+        // ── CE QUI SE PASSE ENSUITE ────────────────────────────────────────────
+        if (grammyEtape === "suite" && grammySuite) {
+            return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "radial-gradient(ellipse 70% 60% at 50% 40%, rgba(60,42,8,.92), rgba(4,6,12,.97))",
+                    backdropFilter: "blur(14px)", overflowY: "auto", padding: "24px 14px" } },
+                react_1.default.createElement("div", { style: { ...cadre, padding: "28px 22px", textAlign: "center", animation: "rise .6s cubic-bezier(.2,.9,.3,1) both" } },
+                    poussiere,
+                    react_1.default.createElement("div", { style: { fontSize: 40, marginBottom: 4 } }, grammySuite.emoji),
+                    react_1.default.createElement("div", { style: { fontFamily: "'Space Mono',monospace", fontSize: 8.5, letterSpacing: 3,
+                            color: "rgba(245,204,92,.55)", textTransform: "uppercase" } }, grammySuite.titre),
+                    grammySuite.dit && (react_1.default.createElement("div", { style: { fontSize: 13, lineHeight: 1.75, color: orClair, marginTop: 13, fontStyle: "italic",
+                            padding: "12px 14px", borderRadius: 10, background: "rgba(245,204,92,.07)",
+                            border: "1px solid rgba(245,204,92,.22)", whiteSpace: "pre-line", textAlign: "left" } }, grammySuite.dit)),
+                    react_1.default.createElement("div", { style: { fontSize: 12.5, lineHeight: 1.75, color: "rgba(242,234,218,.76)", marginTop: 14,
+                            whiteSpace: "pre-line", textAlign: "left" } }, grammySuite.texte),
+                    react_1.default.createElement("button", { className: "qa-btn", onClick: () => {
+                            if (grammySuite.suivant === "fin") {
+                                finirGrammy();
+                            }
+                            else {
+                                setGrammySuite(null);
+                                setGrammyEtape(grammySuite.suivant);
+                            }
+                        }, style: { ...studioBtnStyle, width: "100%", marginTop: 18 } }, grammySuite.suivant === "fin" ? "TOURNER LA PAGE" : "CONTINUER"))));
+        }
+        // ── L'APRÈS ────────────────────────────────────────────────────────────
+        if (grammyEtape === "apres") {
+            return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "radial-gradient(ellipse 70% 60% at 50% 40%, rgba(40,28,8,.93), rgba(4,6,12,.98))",
+                    backdropFilter: "blur(14px)", overflowY: "auto", padding: "24px 14px" } },
+                react_1.default.createElement("div", { style: { ...cadre, padding: "28px 20px", animation: "rise .6s cubic-bezier(.2,.9,.3,1) both" } },
+                    poussiere,
+                    react_1.default.createElement("div", { style: { textAlign: "center" } },
+                        react_1.default.createElement("div", { style: { fontSize: 40, marginBottom: 4 } }, "\uD83C\uDF06"),
+                        react_1.default.createElement("div", { style: { fontFamily: "'Space Mono',monospace", fontSize: 8.5, letterSpacing: 3,
+                                color: "rgba(245,204,92,.55)", textTransform: "uppercase" } }, "Il est une heure du matin"),
+                        react_1.default.createElement("div", { style: { ...titreOr, fontSize: 28, lineHeight: 1.08, marginTop: 6 } }, "ET MAINTENANT ?"),
+                        react_1.default.createElement("div", { style: { fontSize: 12, lineHeight: 1.7, color: "rgba(242,234,218,.66)", marginTop: 10 } }, "Trois voitures t'attendent dehors, et elles ne vont pas au m\u00EAme endroit.")),
+                    react_1.default.createElement("div", { style: { height: 1, margin: "17px 0",
+                            background: "linear-gradient(90deg,transparent,rgba(245,204,92,.4),transparent)" } }),
+                    react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, APRES_GRAMMY.map(a => (react_1.default.createElement("button", { key: a.id, className: "qa-btn", onClick: () => vivreApres(a), style: { display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left", width: "100%",
+                            padding: "13px", borderRadius: 10, cursor: "pointer",
+                            background: "rgba(245,204,92,.055)", border: "1px solid rgba(245,204,92,.26)",
+                            boxShadow: RELIEF_HAUT, color: "rgba(242,234,218,.9)" } },
+                        react_1.default.createElement("span", { style: { fontSize: 19, flexShrink: 0 } }, a.emoji),
+                        react_1.default.createElement("span", { style: { minWidth: 0 } },
+                            react_1.default.createElement("span", { style: { display: "block", fontSize: 12.5, fontFamily: "'Syne',sans-serif", fontWeight: 700 } }, a.label),
+                            react_1.default.createElement("span", { style: { display: "block", fontSize: 10.5, marginTop: 2, color: "rgba(242,234,218,.5)" } }, a.detail),
+                            a.marche < 0 && gs.faithDone && (react_1.default.createElement("span", { style: { display: "block", fontSize: 9.5, marginTop: 3, color: "#e8963c",
+                                    fontFamily: "'Space Mono',monospace" } },
+                                "\u271D\uFE0F marche ",
+                                a.marche))))))))));
+        }
+        // ── UNE CATÉGORIE ──────────────────────────────────────────────────────
+        const r = grammyNommes[grammyIdx];
+        if (!r)
+            return null;
+        const amb = ambianceGrammy(r.cote || 0.1);
+        const derniere = grammyIdx >= grammyNommes.length - 1;
+        const moi = { nom: "FISCO", toi: true };
+        const liste = [{ ...moi, titre: r.projectTitle || null },
+            ...(r.rivaux || []).map(n => ({ nom: n, titre: titreProjet(n, r.category, grammyResult.year) }))];
+        return (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 260, background: "radial-gradient(ellipse 70% 60% at 50% 38%, rgba(48,34,6,.93), rgba(4,6,12,.98))",
+                backdropFilter: "blur(14px)", overflowY: "auto", padding: "24px 14px" } },
+            react_1.default.createElement("div", { style: { ...cadre, padding: "26px 20px", animation: "rise .5s cubic-bezier(.2,.9,.3,1) both" }, key: grammyIdx },
+                poussiere,
+                react_1.default.createElement("div", { style: { textAlign: "center" } },
+                    react_1.default.createElement("div", { style: { fontFamily: "'Space Mono',monospace", fontSize: 8.5, letterSpacing: 3,
+                            color: "rgba(245,204,92,.5)", textTransform: "uppercase" } },
+                        "Cat\u00E9gorie ",
+                        grammyIdx + 1,
+                        " sur ",
+                        grammyNommes.length),
+                    react_1.default.createElement("div", { style: { ...titreOr, fontSize: 24, lineHeight: 1.1, marginTop: 6 } }, r.category),
+                    typeTitre(r.category) && (react_1.default.createElement("div", { style: { fontSize: 9.5, color: "rgba(242,234,218,.38)", marginTop: 4,
+                            fontFamily: "'Space Mono',monospace", letterSpacing: 1, textTransform: "uppercase" } }, typeTitre(r.category) === "album" ? "les projets en lice" : "les titres en lice"))),
+                react_1.default.createElement("div", { style: { height: 1, margin: "16px 0",
+                        background: "linear-gradient(90deg,transparent,rgba(245,204,92,.4),transparent)" } }),
+                react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, liste.map((n, i) => {
+                    const vainqueur = grammyOuvert && ((n.toi && r.youWon) || (!n.toi && n.nom === r.gagnant));
+                    const perdant = grammyOuvert && !vainqueur;
+                    return (react_1.default.createElement("div", { key: i, style: { padding: "9px 12px", borderRadius: 9,
+                            display: "flex", alignItems: "center", gap: 9,
+                            transition: "all .45s cubic-bezier(.2,.9,.3,1)",
+                            opacity: perdant ? .32 : 1,
+                            background: vainqueur ? "linear-gradient(90deg,rgba(245,204,92,.26),rgba(245,204,92,.06))"
+                                : n.toi ? "rgba(245,204,92,.07)" : "rgba(255,255,255,.028)",
+                            border: vainqueur ? "1px solid rgba(245,204,92,.6)"
+                                : n.toi ? "1px solid rgba(245,204,92,.3)" : "1px solid rgba(255,255,255,.07)",
+                            boxShadow: vainqueur ? "0 0 28px -6px rgba(245,204,92,.6)" : "none",
+                            transform: vainqueur ? "scale(1.025)" : "scale(1)" } },
+                        react_1.default.createElement("span", { style: { fontSize: 13, width: 16, textAlign: "center", flexShrink: 0 } }, vainqueur ? "🏆" : n.toi ? "🎤" : "·"),
+                        react_1.default.createElement("span", { style: { minWidth: 0 } },
+                            react_1.default.createElement("span", { style: { display: "block", fontSize: 12.5, fontWeight: n.toi ? 800 : 600,
+                                    color: vainqueur ? orClair : n.toi ? or : "rgba(242,234,218,.78)",
+                                    fontFamily: "'Syne',sans-serif", letterSpacing: n.toi ? .5 : 0 } }, n.nom),
+                            n.titre && (react_1.default.createElement("span", { style: { display: "block", fontSize: 10.5, marginTop: 1, fontStyle: "italic",
+                                    color: vainqueur ? "rgba(255,233,168,.8)" : "rgba(242,234,218,.45)",
+                                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                                "\u00AB ",
+                                n.titre,
+                                " \u00BB")))));
+                })),
+                !grammyOuvert ? (react_1.default.createElement(react_1.default.Fragment, null,
+                    react_1.default.createElement("div", { style: { textAlign: "center", fontSize: 11.5, marginTop: 15, color: amb.c, fontStyle: "italic" } }, amb.t),
+                    react_1.default.createElement("div", { style: { textAlign: "center", marginTop: 14 } },
+                        react_1.default.createElement("div", { style: { fontFamily: "'Bebas Neue',cursive", fontSize: 16, letterSpacing: 2,
+                                color: "rgba(242,234,218,.72)" } }, "AND THE GRAMMY GOES TO\u2026"),
+                        react_1.default.createElement("button", { className: "qa-btn", onClick: () => { setGrammyOuvert(true); sfx(r.youWon ? "success" : "error"); }, "aria-label": "Ouvrir l'enveloppe", style: { margin: "12px auto 0", width: 132, height: 88, borderRadius: 12, cursor: "pointer",
+                                background: "linear-gradient(165deg,#f7e3ac,#e0c27a 48%,#b9923f)",
+                                border: "1px solid rgba(255,233,168,.75)", display: "grid", placeItems: "center",
+                                boxShadow: "0 1px 0 rgba(255,255,255,.5) inset, 0 22px 46px -18px rgba(0,0,0,.95), 0 0 34px -8px rgba(245,204,92,.6)",
+                                animation: "braise 1.9s ease-in-out infinite" } },
+                            react_1.default.createElement("span", { style: { fontSize: 30, filter: "drop-shadow(0 2px 3px rgba(0,0,0,.35))" } }, "\u2709\uFE0F")),
+                        react_1.default.createElement("div", { style: { fontSize: 10, color: "rgba(242,234,218,.4)", marginTop: 9,
+                                fontFamily: "'Space Mono',monospace" } }, "touche l'enveloppe quand tu es pr\u00EAt")))) : (react_1.default.createElement(react_1.default.Fragment, null,
+                    react_1.default.createElement("div", { style: { textAlign: "center", marginTop: 17 } }, r.youWon ? (react_1.default.createElement(react_1.default.Fragment, null,
+                        react_1.default.createElement("div", { style: { ...titreOr, fontSize: 30, animation: "glow 2s ease-in-out infinite" } }, "C'EST TOI"),
+                        react_1.default.createElement("div", { style: { fontSize: 12.5, lineHeight: 1.65, color: "rgba(242,234,218,.78)", marginTop: 9 } }, r.bought
+                            ? "La salle se lève. Tu souris, tu remercies, tu montes chercher le trophée.\n\nTu es le seul ici à savoir que ce vote était décidé avant la soirée."
+                            : "La salle se lève avant que tu aies bougé. Le chemin jusqu'à la scène fait quinze mètres et il te paraît très long."))) : (react_1.default.createElement(react_1.default.Fragment, null,
+                        react_1.default.createElement("div", { style: { fontFamily: "'Bebas Neue',cursive", fontSize: 26, letterSpacing: 2,
+                                color: "rgba(242,234,218,.88)" } }, r.gagnant),
+                        react_1.default.createElement("div", { style: { fontSize: 12.5, lineHeight: 1.65, color: "rgba(242,234,218,.6)", marginTop: 9 } }, (r.cote || 0) >= 0.3
+                            ? "Tu applaudis. La caméra reste sur toi deux secondes de trop, et tout le monde le remarque."
+                            : "Tu applaudis, et personne ne te regarde. C'est presque plus confortable comme ça.")))),
+                    react_1.default.createElement("button", { className: "qa-btn", onClick: () => {
+                            if (derniere) {
+                                setGrammyEtape(grammyResult.winsCount > 0 ? "discours" : "bilan");
+                            }
+                            else {
+                                setGrammyIdx(i => i + 1);
+                                setGrammyOuvert(false);
+                            }
+                        }, style: { ...studioBtnStyle, width: "100%", marginTop: 18 } }, derniere ? "FIN DE LA CÉRÉMONIE" : "CATÉGORIE SUIVANTE"))))));
+    })() : null;
     const PendOv = pendingAlert && !activeEvent && !calAlert && !grammyResult ? (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 240, background: "rgba(4,9,26,.65)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px", overflowY: "auto" } },
         react_1.default.createElement("div", { style: { position: "relative", margin: "auto", background: "linear-gradient(135deg,#1a0d35,#2a1f4a)", border: "1px solid rgba(200,119,255,.4)", borderRadius: 14, padding: "24px 22px", maxWidth: 360, width: "92%", animation: "pendingPop .3s ease", textAlign: "center" } },
             react_1.default.createElement("div", { style: { fontSize: 36, marginBottom: 10 } }, "\u23F0"),
@@ -29962,7 +30693,7 @@ function FiscoGame() {
                         const leaked = Math.random() < 0.62;
                         if (leaked) {
                             dispatch({ type: "RESOLVE_SECRET", id: s.id, exposed: true, repDelta: s.exposeRep });
-                            dispatch({ type: "APPLY", effects: { stress: +35, social: halveSocial() } });
+                            dispatch({ type: "APPLY", effects: { stress: +35, social: moitieAudience(gs) } });
                             addLog(`[SECRET] Révélé publiquement — ${s.exposeRep} rep`);
                             setCalAlert({ emoji: "💥", title: "Tout sort",
                                 desc: `Il n'a pas bluffé. L'information est publiée avec preuves à l'appui, reprise partout en quelques heures.\n\nTu perds ${Math.abs(s.exposeRep)} points de réputation et une part importante de ton audience. Certaines choses ne se réparent pas.` });
