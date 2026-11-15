@@ -8253,6 +8253,21 @@ const ROMANCE_FRIEND_MIN = 62;
 // Anok Yai est écrite comme la future femme de Falltos et la mère de Dario :
 // elle n'est pas sur le marché, avant ni après l'annonce.
 const RESERVES_SCENARIO = new Set(["anok_yai"]);
+// Les gens dont la vie privée te concerne vraiment. Le cercle n'en fait pas
+// partie : être riche et connu ne fait pas de quelqu'un un proche.
+const PROCHES_FIXES = new Set(["weeknd", "the_weeknd", "drake", "falltos", "jack_grealish"]);
+function estUnProche(gs, id) {
+    if (!gs || !id)
+        return false;
+    if (PROCHES_FIXES.has(id))
+        return true;
+    if (gs.romance && (gs.romance.partner === id || gs.romance.exPartner === id))
+        return true;
+    const r = (gs.relations || {})[id] || {};
+    if (["ami", "famille", "cercle proche"].includes(r.status))
+        return true;
+    return (r.score || 0) >= 70;
+}
 function romanceEligible(gs, id) {
     const c = CHARS_BY_ID[id] || (gs.newCast || {})[id];
     if (!c)
@@ -16052,28 +16067,57 @@ function retirementYear(p) {
 // Dario Falletta apparaît au marché des transferts dès ses débuts, et n'en
 // partira jamais pour San Jose : l'Atlético ne vend pas, et son père non plus.
 const DARIO_AN = 365.25 * 86400000;
-// Quel jalon de l'arc Falltos / Anok Yai / Dario est dû à cette date ? Fonction
-// pure : c'est elle qu'on mesure sur quarante ans de dates simulées.
-function jalonDario(gs) {
+// ── LA LIGNÉE FALLETTA ─────────────────────────────────────────────────────
+// Trois enfants, et rien d'autre : Falltos est écarté des naissances tirées au
+// hasard. Chaque jalon connaît sa date ; la liste est triée par date, donc
+// l'ordre tient même quand un saut de temps en rend plusieurs exigibles.
+function jalonsFalletta(gs) {
+    const d = gs.dario, a = gs.alpha, f = gs.filleF, AN = DARIO_AN, L = [];
+    if (gs.anokAt && !d)
+        L.push(["naissance", gs.anokAt + 2 * AN]);
+    if (d && !a)
+        L.push(["alpha", d.birth + 3 * AN]);
+    if (a && !f)
+        L.push(["fille", a.birth + 6 * AN]);
+    if (d && !d.debut)
+        L.push(["nice", d.birth + 16 * AN]);
+    if (d && d.club === "nice")
+        L.push(["atletico", d.birth + 19 * AN]);
+    if (f && !f.debut)
+        L.push(["creatrice", f.birth + 14 * AN]);
+    if (a && !a.etape)
+        L.push(["diplome", a.birth + 24 * AN]);
+    if (a && a.etape === "diplome")
+        L.push(["prada", a.birth + 26 * AN]);
+    if (a && a.etape === "prada")
+        L.push(["balenciaga", a.birth + 32 * AN]);
+    return L.sort((x, y) => x[1] - y[1]);
+}
+// Quel jalon est dû aujourd'hui ? Fonction pure : c'est elle qu'on mesure.
+function jalonFalletta(gs) {
     if (!gs)
         return null;
     const partis = new Set([...(gs.deceased || []), ...(gs.erased || [])]);
     if (!gs.anokPlan)
         return "plan";
-    if (!gs.anokAt)
+    if (!gs.anokAt) {
         // Une partie antérieure à cette règle peut l'avoir comme compagne : dans ce
-        // cas l'annonce n'a pas lieu, et l'arc de Dario ne s'ouvre pas.
-        return (gs.currentDate >= gs.anokPlan && !partis.has("falltos") && !partis.has("anok_yai")
-            && !(gs.romance && gs.romance.partner === "anok_yai")
-            && !(gs.romance && (gs.romance.pastPartners || []).includes("anok_yai"))
-            && !(gs.romance && gs.romance.exPartner === "anok_yai")) ? "couple" : null;
-    if (!gs.dario)
-        return (gs.currentDate >= gs.anokAt + 2 * DARIO_AN && !partis.has("falltos")) ? "naissance" : null;
-    if (!gs.dario.debut)
-        return (gs.currentDate >= gs.dario.birth + 16 * DARIO_AN) ? "nice" : null;
-    if (gs.dario.club === "nice" && gs.currentDate >= gs.dario.birth + 19 * DARIO_AN)
-        return "atletico";
-    return null;
+        // cas l'annonce n'a pas lieu, et la lignée ne s'ouvre pas.
+        const prise = !!(gs.romance && (gs.romance.partner === "anok_yai"
+            || gs.romance.exPartner === "anok_yai"
+            || (gs.romance.pastPartners || []).includes("anok_yai")));
+        return (gs.currentDate >= gs.anokPlan && !partis.has("falltos") && !partis.has("anok_yai") && !prise)
+            ? "couple" : null;
+    }
+    if (partis.has("falltos") && !gs.dario)
+        return null;
+    const du = jalonsFalletta(gs).filter(([, t]) => gs.currentDate >= t);
+    return du.length ? du[0][0] : null;
+}
+// La date du prochain jalon — c'est là que le code de triche emmène.
+function dateProchainJalon(gs) {
+    const L = jalonsFalletta(gs);
+    return L.length ? L[0][1] : null;
 }
 function darioEntry(gs) {
     const d = gs && gs.dario;
@@ -19592,7 +19636,7 @@ const INIT = {
     rlM6: null, detteVue: 0, bienFaits: [], bienVu: 0, marche: null, bonnePart: false, dime: false, falltosVus: [], naelVus: [], marcheActs: {}, marcheJour: null, marcheVu: null, tentations: [], temoignages: [], publicFidele: 0, nael: null, eliteSince: null, membreDepuis: null, grossesseCercle: null, enfantLivre: null, enfantRevu: false, sacrifices: [], warMission: null, warMissionsDone: [], docLeaked: false, eliteInfluence: 0, favorsUsed: [], circleNews: [], evidence: 0, exposure: 0, activeOps: [], pendingCM: null, cmDone: [], activeOp: null, opsDone: [], targetExposure: {}, exposedTargets: [],
     allyState: { falltos: "actif", kanye_west: "actif", candace_owens: "actif", alain_soral: "actif", dieudonne: "actif", ryan_garcia: "actif", justin_bieber: "absent", the_weeknd: "absent" },
     inResistance: false, awardsBanned: false, conspiracist: false, tutorialDone: false, baptismDate: null, faithStart: null, faithStage: 0, faithDone: false, exElite: false,
-    anokPlan: null, anokAt: null, dario: null, npcKids: [], warrant: null, mourning: false, mourningTold: false, boughtGrammys: [], lawShield: false, openCountries: [], mediaCycle: null, kaineEnded: null, eliteMet: [], newElites: {}, lastRecruitYear: null, curiaNames: null, curiaUntil: null, mkStage: {}, mkActive: null, mkFails: [], mkDone: {}, sacrificesDone: [], festivalDisaster: null, sabotaged: [], erased: [], seatsPlaced: [], lawsPassed: [], exitStrikes: [], resistanceTried: false, resistDeclinedAt: null, musicTier: null, musicOn: true, falltosSacrificed: false, lastFalltosOffer: null, eliteService: 0, rankSeen: null, eliteMission: null, eliteMissionsDone: [], circleOp: null, circleOpsDone: [], circleOpsFailed: [], lastCircleOpAt: null, eliteEndDone: false, lastEliteOffer: null, eliteOfferAt: null, eliteRefused: false, pendingDeath: null, elite: false, eliteOffered: false, eliteStrikes: 0, eliteFallen: false, hits: [], postStreaming: null, lastSummerHitYear: null, mentalAspects: { anxiety: 22, burnout: 18, loneliness: 25, purpose: 78 }, therapy: null, addictions: [], stis: [], unsafeActs: 0, lastStiCheck: null, stiTested: null,
+    anokPlan: null, anokAt: null, dario: null, alpha: null, filleF: null, npcKids: [], warrant: null, mourning: false, mourningTold: false, boughtGrammys: [], lawShield: false, openCountries: [], mediaCycle: null, kaineEnded: null, eliteMet: [], newElites: {}, lastRecruitYear: null, curiaNames: null, curiaUntil: null, mkStage: {}, mkActive: null, mkFails: [], mkDone: {}, sacrificesDone: [], festivalDisaster: null, sabotaged: [], erased: [], seatsPlaced: [], lawsPassed: [], exitStrikes: [], resistanceTried: false, resistDeclinedAt: null, musicTier: null, musicOn: true, falltosSacrificed: false, lastFalltosOffer: null, eliteService: 0, rankSeen: null, eliteMission: null, eliteMissionsDone: [], circleOp: null, circleOpsDone: [], circleOpsFailed: [], lastCircleOpAt: null, eliteEndDone: false, lastEliteOffer: null, eliteOfferAt: null, eliteRefused: false, pendingDeath: null, elite: false, eliteOffered: false, eliteStrikes: 0, eliteFallen: false, hits: [], postStreaming: null, lastSummerHitYear: null, mentalAspects: { anxiety: 22, burnout: 18, loneliness: 25, purpose: 78 }, therapy: null, addictions: [], stis: [], unsafeActs: 0, lastStiCheck: null, stiTested: null,
     reissues: [], endedRuns: null, atoneLog: [], pendingLeak: null, betrayals: [], industryEra: null, eraIndex: 0, eraAdapted: [], secrets: [], secretThreat: null,
     objectives: [], objectivesDone: [], timeline: [], grief: null, callbacks: [],
     healthAspects: { voice: 88, body: 85, sleep: 80, mind: 82 },
@@ -19762,7 +19806,7 @@ function capFame(next) {
 // s'en approcher.
 // Affichée dans les paramètres : elle dit d'un coup d'œil si la partie tourne
 // bien sur la dernière version du jeu.
-const VERSION_JEU = "105";
+const VERSION_JEU = "111";
 // Le seuil à partir duquel une fortune commence à se défendre au lieu de croître
 const SEUIL_GRANDE_FORTUNE = 3000000000;
 const TAUX_FROTTEMENT = 0.34; // par an sur la part au-dessus du seuil, et ça s'accélère
@@ -20935,6 +20979,30 @@ function gameReducerInner(state, action) {
             return { ...state, grossesseCercle: action.due ? { mere: action.mere, due: action.due, annonceAt: state.currentDate } : null };
         // Droit au soir des Grammy : on pose la date sur le 4 février suivant et on
         // rouvre la cérémonie de cette année-là.
+        // Chaque saisie du code amène au jalon suivant de l'arc Falltos / Anok / Dario.
+        // Chaque saisie du code amène au jalon suivant de la lignée Falletta.
+        case "CHEAT_DARIO": {
+            const J = 86400000;
+            if (!state.anokAt)
+                return { ...state, anokPlan: state.currentDate, currentDate: state.currentDate + J };
+            const cible = dateProchainJalon(state);
+            if (cible === null)
+                return state;
+            const t = cible + J;
+            if (t <= state.currentDate)
+                return state;
+            const avant = new Date(state.currentDate).getFullYear();
+            // Sauter trente ans en quelques clics épuisait le personnage et le tuait
+            // avant la fin de l'histoire. Un code de triche ne doit pas finir la
+            // partie : on remet en forme, et on repousse la vieillesse juste assez.
+            const ageCible = yearsElapsed(t, FISCO_BIRTHDATE);
+            return { ...state, currentDate: t,
+                careerYears: (state.careerYears || 0) + (new Date(t).getFullYear() - avant),
+                health: Math.max(state.health || 0, 85),
+                energy: Math.max(state.energy || 0, 85),
+                stress: Math.min(state.stress || 0, 15),
+                deathAge: Math.max(state.deathAge || 0, ageCible + 8) };
+        }
         case "CHEAT_GRAMMY": {
             const d = new Date(state.currentDate);
             const cible = new Date(d.getFullYear(), 1, 4, 19, 30, 0);
@@ -21072,6 +21140,10 @@ function gameReducerInner(state, action) {
             return { ...state, anokAt: action.at };
         case "DARIO_SET":
             return { ...state, dario: action.dario };
+        case "ALPHA_SET":
+            return { ...state, alpha: action.alpha };
+        case "FILLE_SET":
+            return { ...state, filleF: action.fille };
         case "NPC_KID_DEBUT":
             return { ...state,
                 npcKids: (state.npcKids || []).map(k => k.id === action.id ? { ...k, debuted: true } : k),
@@ -22991,7 +23063,25 @@ function FiscoGame() {
     const premiersPasRef = (0, react_1.useRef)(false);
     const setActiveEvent = (0, react_1.useCallback)(v => { if (v && premiersPasRef.current)
         return; setActiveEventBrut(v); }, []);
-    const [calAlert, setCalAlert] = (0, react_1.useState)(null);
+    // Deux alertes peuvent tomber le même jour. Sans file, la seconde écrasait la
+    // première, qui disparaissait sans avoir été lue — on la met en attente.
+    const [calAlert, setCalAlertBrut] = (0, react_1.useState)(null);
+    const calAlertRef = (0, react_1.useRef)(null);
+    const fileAlertes = (0, react_1.useRef)([]);
+    const setCalAlert = (0, react_1.useCallback)(a => {
+        if (a) {
+            if (calAlertRef.current) {
+                fileAlertes.current.push(a);
+                return;
+            }
+            calAlertRef.current = a;
+            setCalAlertBrut(a);
+            return;
+        }
+        const suivante = fileAlertes.current.shift() || null;
+        calAlertRef.current = suivante;
+        setCalAlertBrut(suivante);
+    }, []);
     // Une annonce majeure a son propre emplacement : elle passe devant toutes les
     // autres, aucune alerte du même tour ne peut l'écraser, et « passer l'année »
     // n'a pas le droit de la faire disparaître.
@@ -25017,7 +25107,7 @@ function FiscoGame() {
         // Une seule date, tirée une fois pour toutes entre 2028 et 2034 ; deux ans
         // après, un enfant ; seize ans après, un footballeur.
         if (phase === "game" && !ending) {
-            const jalon = jalonDario(gs);
+            const jalon = jalonFalletta(gs);
             if (jalon === "plan") {
                 const deb = Math.max(gs.currentDate, new Date(2028, 0, 1).getTime());
                 const fin = new Date(2034, 11, 31).getTime();
@@ -25027,22 +25117,40 @@ function FiscoGame() {
             else if (jalon === "couple") {
                 dispatch({ type: "ANOK_COUPLE", at: gs.currentDate });
                 addLog("[CASTING] Falltos et Anok Yai officialisent");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "💞",
-                        title: "Falltos et Anok Yai officialisent" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "💞", title: "Falltos et Anok Yai officialisent" } });
                 setCalAlert({ emoji: "💞", title: "Falltos n'est plus seul", majeur: true,
                     desc: `La photo sort sans légende, et il n'y en a pas besoin : **Falltos est en couple avec Anok Yai**.\n\nTu le savais avant tout le monde, ou tu l'apprends comme tout le monde — ça dépend de ce que vous êtes encore l'un pour l'autre.\n\nIl ne commente pas. Elle non plus.` });
             }
             else if (jalon === "naissance") {
-                const kid = { id: "dario_falletta", name: "Dario Falletta", emoji: "⚽️", cat: "sport",
-                    loc: "Nice", parentId: "falltos", parentName: "Falltos", birth: gs.currentDate,
-                    sex: "m", careerLabel: "Footballeur", dario: true };
-                dispatch({ type: "NPC_BIRTH", kid });
+                dispatch({ type: "NPC_BIRTH", kid: { id: "dario_falletta", name: "Dario Falletta", emoji: "⚽️", cat: "sport",
+                        loc: "Nice", parentId: "falltos", parentName: "Falltos", birth: gs.currentDate,
+                        sex: "m", careerLabel: "Footballeur", dario: true } });
                 dispatch({ type: "DARIO_SET", dario: { birth: gs.currentDate, club: null, debut: null } });
                 addLog("[NAISSANCE] Dario Falletta, fils de Falltos et Anok Yai");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶",
-                        title: "Naissance de Dario Falletta" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: "Naissance de Dario Falletta" } });
                 setCalAlert({ emoji: "👶", title: "Falltos est père", majeur: true,
                     desc: `Un garçon. **Dario Falletta** — le nom de famille que Falltos n'utilise jamais sur scène, et qu'il donne pourtant à son fils.\n\nAnok Yai et lui ne diront rien de plus que ça.\n\nDans seize ans, ce gamin commencera sa propre carrière. Rien ne dit qu'elle aura à voir avec la musique.` });
+            }
+            else if (jalon === "alpha") {
+                dispatch({ type: "NPC_BIRTH", kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode",
+                        loc: "Paris", parentId: "falltos", parentName: "Falltos", birth: gs.currentDate,
+                        sex: "m", careerLabel: "Créateur de mode", dario: true } });
+                dispatch({ type: "ALPHA_SET", alpha: { birth: gs.currentDate, etape: null } });
+                addLog("[NAISSANCE] Alpha Falletta, deuxième fils de Falltos et Anok Yai");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: "Naissance d'Alpha Falletta" } });
+                setCalAlert({ emoji: "👶", title: "Un deuxième fils", majeur: true,
+                    desc: `Trois ans après Dario, **Alpha Falletta**.\n\nAnok Yai a posté une photo de deux petites mains, rien d'autre. Falltos n'a rien dit du tout.` });
+            }
+            else if (jalon === "fille") {
+                const prenom = "Dalia"; // la petite dernière a son prénom, pas un tirage
+                dispatch({ type: "NPC_BIRTH", kid: { id: "fille_falletta", name: `${prenom} Falletta`, emoji: "📱", cat: "influencer",
+                        loc: "Paris", parentId: "falltos", parentName: "Falltos", birth: gs.currentDate,
+                        sex: "f", careerLabel: "Créatrice de contenu", dario: true } });
+                dispatch({ type: "FILLE_SET", fille: { birth: gs.currentDate, prenom, debut: null } });
+                addLog(`[NAISSANCE] ${prenom} Falletta, fille de Falltos et Anok Yai`);
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: `Naissance de ${prenom} Falletta` } });
+                setCalAlert({ emoji: "👶", title: "Une fille, Dalia", majeur: true,
+                    desc: `Six ans après Alpha, Anok Yai et Falltos ont une fille : **${prenom} Falletta**.\n\nTroisième et dernier enfant. Falltos a dit une seule phrase là-dessus, et c'était pour demander qu'on les laisse tranquilles.` });
             }
             else if (jalon === "nice") {
                 dispatch({ type: "NPC_KID_DEBUT", id: "dario_falletta",
@@ -25050,8 +25158,7 @@ function FiscoGame() {
                         bio: "Footballeur à l'OGC Nice · fils de Falltos et Anok Yai." } });
                 dispatch({ type: "DARIO_SET", dario: { ...gs.dario, club: "nice", debut: gs.currentDate } });
                 addLog("[FOOT] Dario Falletta signe son premier contrat à l'OGC Nice");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "⚽️",
-                        title: "Dario Falletta débute à l'OGC Nice" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "⚽️", title: "Dario Falletta débute à l'OGC Nice" } });
                 setCalAlert({ emoji: "⚽️", title: "Le fils de Falltos signe à Nice", majeur: true,
                     desc: `Seize ans. **Dario Falletta** signe son premier contrat professionnel à l'**OGC Nice**.\n\nPas la musique, donc. Le football — et à un niveau qui fait déjà parler les recruteurs de toute l'Europe.\n\nTu le verras apparaître dans le marché des transferts. Tu ne pourras pas l'acheter : ce garçon-là n'est pas une opportunité, c'est le fils de quelqu'un.` });
             }
@@ -25061,10 +25168,50 @@ function FiscoGame() {
                     kid: { id: "dario_falletta", name: "Dario Falletta", emoji: "⚽️", cat: "sport", loc: "Madrid",
                         bio: "Footballeur à l'Atlético Madrid · fils de Falltos et Anok Yai." } });
                 addLog("[FOOT] Dario Falletta rejoint l'Atlético Madrid");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🔴",
-                        title: "Dario Falletta rejoint l'Atlético Madrid" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🔴", title: "Dario Falletta rejoint l'Atlético Madrid" } });
                 setCalAlert({ emoji: "🔴", title: "Dario Falletta part à Madrid", majeur: true,
                     desc: `Dix-neuf ans, trois saisons à Nice, et un transfert qui ne surprend personne : **Dario Falletta rejoint l'Atlético Madrid**.\n\nIl y restera. Ce n'est pas une promesse de communicant — c'est ce qui finira par arriver : il fera toute sa carrière là-bas, et il y raccrochera.\n\nSon père n'était jamais venu voir un match. Il était dans les tribunes pour celui-là.` });
+            }
+            else if (jalon === "creatrice") {
+                const nomF = `${gs.filleF.prenom} Falletta`;
+                dispatch({ type: "NPC_KID_DEBUT", id: "fille_falletta",
+                    kid: { id: "fille_falletta", name: nomF, emoji: "📱", cat: "influencer", loc: "Paris",
+                        bio: "Créatrice de contenu très suivie · fille de Falltos et Anok Yai." } });
+                dispatch({ type: "FILLE_SET", fille: { ...gs.filleF, debut: gs.currentDate } });
+                addLog(`[INTERNET] ${nomF} dépasse le million d'abonnés`);
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "📱", title: `${nomF} perce sur internet` } });
+                setCalAlert({ emoji: "📱", title: "La fille de Falltos perce", majeur: true,
+                    desc: `Quatorze ans, et **${nomF}** compte déjà des millions d'abonnés.\n\nTout le monde sait de qui elle est la fille, et ça n'explique pas grand-chose : elle a trouvé son public toute seule, avec des codes que son père ne comprend pas.` });
+            }
+            else if (jalon === "diplome") {
+                dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, etape: "diplome" } });
+                dispatch({ type: "NPC_KID_DEBUT", id: "alpha_falletta",
+                    kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode", loc: "Paris",
+                        bio: "Jeune créateur de mode · fils de Falltos et Anok Yai." } });
+                addLog("[MODE] Alpha Falletta sort diplômé");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🎓", title: "Alpha Falletta sort diplômé en mode" } });
+                setCalAlert({ emoji: "🎓", title: "Alpha Falletta sort de l'école", majeur: true,
+                    desc: `Vingt-quatre ans, et des années d'études de mode derrière lui — pendant que son frère jouait devant soixante mille personnes.\n\nIl n'a pas pris de raccourci. Il n'a jamais utilisé le nom de son père pour obtenir un stage, et ça s'est su.` });
+            }
+            else if (jalon === "prada") {
+                dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, etape: "prada" } });
+                dispatch({ type: "NPC_KID_DEBUT", id: "alpha_falletta",
+                    kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode", loc: "Milan",
+                        bio: "Directeur artistique de Prada · fils de Falltos et Anok Yai." } });
+                addLog("[MODE] Alpha Falletta nommé directeur artistique de Prada");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🖤", title: "Alpha Falletta, directeur artistique de Prada" } });
+                setCalAlert({ emoji: "🖤", title: "Alpha Falletta chez Prada", majeur: true,
+                    desc: `Vingt-six ans. **Alpha Falletta est nommé directeur artistique de Prada**.\n\nLa maison la plus difficile à convaincre de Milan vient de confier ses collections au fils d'un rappeur français — et personne dans le métier n'a trouvé ça absurde.` });
+            }
+            else if (jalon === "balenciaga") {
+                dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, etape: "balenciaga" } });
+                dispatch({ type: "NPC_KID_DEBUT", id: "alpha_falletta",
+                    kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode", loc: "Paris",
+                        bio: "Directeur artistique de Balenciaga · fils de Falltos et Anok Yai." } });
+                addLog("[MODE] Alpha Falletta prend la direction artistique de Balenciaga");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🕶️", title: "Alpha Falletta, directeur artistique de Balenciaga" } });
+                setCalAlert({ emoji: "🕶️", title: "Alpha Falletta chez Balenciaga", majeur: true,
+                    desc: `Cinq ans chez Prada, et il part. À trente-deux ans, **Alpha Falletta prend la direction artistique de Balenciaga**.\n\nSon père a mis vingt ans à faire admettre qu'il était un artiste. Son fils n'a eu à le démontrer à personne.` });
             }
         }
         // ── Le casting fait des enfants ──
@@ -25090,7 +25237,8 @@ function FiscoGame() {
                     const kid = makeNpcKid(parent, gs.currentDate, used);
                     dispatch({ type: "NPC_BIRTH", kid });
                     addLog(`[NAISSANCE] ${kid.name}, enfant de ${parent.name}`);
-                    if ((gs.relations[parent.id] || { score: 0 }).score >= 45 || isElite(parent)) {
+                    // On ne te prévient que pour un proche : le reste part au journal.
+                    if (estUnProche(gs, parent.id)) {
                         setCalAlert({ emoji: "👶", title: `${parent.emoji} ${parent.name} est parent`,
                             desc: `${have > 0 ? `${have + 1}${have + 1 === 2 ? "e" : "e"} enfant` : "Premier enfant"} : **${kid.name}**.\n\nTu l'apprends avant la presse, ce qui veut dire quelque chose.\n\nDans seize ans, cet enfant commencera sa propre carrière — et rien ne dit qu'elle ressemblera à celle de son parent.` });
                     }
@@ -28452,6 +28600,7 @@ function FiscoGame() {
         ["T'sais qu'on sera toujours là En haut du podium", "On mate les étoiles", "Si tu veux plus jamais nous revoir Change de vie"],
         ["Déchiré j'vois s'arrêter le temp", "J'suis pas chez moi j'ai plus trop le temp", "Entre Toronto et Paris", "T'a Kapté la vie c'est magique"],
         ["Tu m'a dit tu voulait rester au top meuf", "Si au grammy j'suis nommé artiste de l'année", "ton cœur est une pureté"],
+        ["J'ai vu Falltos poser les armes pour une seule femme", "Son gosse portera le nom qu'il a jamais mis sur un disque"],
     ];
     const estUnCodeSecret = (0, react_1.useCallback)(txt => {
         const n = String(txt || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -28462,6 +28611,33 @@ function FiscoGame() {
     const submitFreeText = (0, react_1.useCallback)((kind, text) => {
         // ── Code secret ──
         const norm = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+        // ── Code : l'histoire des Falletta, un jalon à la fois ──
+        // Reconnu dans n'importe quelle interview, comme les autres codes.
+        if (kind === "interview"
+            && norm(text).includes(norm("J'ai vu Falltos poser les armes pour une seule femme"))
+            && norm(text).includes(norm("Son gosse portera le nom qu'il a jamais mis sur un disque"))) {
+            setFreeTextModal(null);
+            setFreeTextValue("");
+            const etape = !gs.anokAt ? "couple" : (jalonsFalletta(gs)[0] || [null])[0];
+            if (!etape) {
+                toast("👨‍👧‍👦 L'histoire des Falletta est déjà allée jusqu'au bout.", "#e8963c");
+                return;
+            }
+            const quoi = { couple: "l'annonce de Falltos et Anok Yai",
+                naissance: "la naissance de Dario Falletta",
+                alpha: "la naissance d'Alpha Falletta",
+                fille: "la naissance de Dalia Falletta",
+                nice: "les seize ans de Dario, et l'OGC Nice",
+                atletico: "ses dix-neuf ans, et l'Atlético Madrid",
+                creatrice: "les quatorze ans de Dalia, et sa percée",
+                diplome: "les vingt-quatre ans d'Alpha, et son diplôme",
+                prada: "ses vingt-six ans, et la direction artistique de Prada",
+                balenciaga: "ses trente-deux ans, et Balenciaga" }[etape] || "la suite";
+            dispatch({ type: "CHEAT_DARIO" });
+            addLog("[???] Le temps file vers les Falletta");
+            toast(`⏩ Les années se plient — devant toi : ${quoi}`, "#e8c25c");
+            return;
+        }
         if (kind === "interview" && (interviewOutlet === null || interviewOutlet === void 0 ? void 0 : interviewOutlet.id) === "tf1jt"
             && norm(text).includes(norm("J'suis sur le trône j'ai viré Elie"))
             && norm(text).includes(norm("Laissez moi dans mon délire"))) {
@@ -29144,7 +29320,13 @@ function FiscoGame() {
             react_1.default.createElement("div", { style: { fontSize: 48, marginBottom: 12 } }, calAff.emoji),
             react_1.default.createElement("div", { style: { fontFamily: "'Bebas Neue',cursive", fontSize: calAff.majeur ? 27 : 24, color: "#f2c379", letterSpacing: 2, marginBottom: 8 } }, calAff.title),
             react_1.default.createElement("div", { style: { fontSize: 13, color: "rgba(255,255,255,.75)", lineHeight: "1.7", marginBottom: 20, whiteSpace: "pre-line" } }, calAff.desc),
-            (calAff.actions && calAff.actions.length) ? (react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, calAff.actions.map((a, i) => (react_1.default.createElement("button", { key: i, onClick: () => { setAnnonceMajeure(null); setCalAlert(null); setTimeout(() => a.run(), 20); }, style: { background: i === 0 ? "rgba(255,220,50,.15)" : "rgba(255,255,255,.05)", border: i === 0 ? "1px solid rgba(255,220,50,.4)" : "1px solid rgba(255,255,255,.18)", color: i === 0 ? "#f2c379" : "rgba(255,255,255,.7)", padding: "11px 16px", borderRadius: 8, fontFamily: "'Space Mono',monospace", fontVariantNumeric: "tabular-nums", fontSize: 12, cursor: "pointer" } }, a.label))))) : (react_1.default.createElement("button", { onClick: () => { setAnnonceMajeure(null); setCalAlert(null); }, style: { background: "rgba(255,220,50,.15)", border: "1px solid rgba(255,220,50,.4)", color: "#f2c379", padding: "11px 28px", borderRadius: 8, fontFamily: "'Bebas Neue',cursive", fontSize: 16, letterSpacing: 3, cursor: "pointer" } }, calAff.majeur ? "J'AI LU" : "OK"))))) : null;
+            (calAff.actions && calAff.actions.length) ? (react_1.default.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } }, calAff.actions.map((a, i) => (react_1.default.createElement("button", { key: i, onClick: () => { if (annonceMajeure)
+                    setAnnonceMajeure(null);
+                else
+                    setCalAlert(null); setTimeout(() => a.run(), 20); }, style: { background: i === 0 ? "rgba(255,220,50,.15)" : "rgba(255,255,255,.05)", border: i === 0 ? "1px solid rgba(255,220,50,.4)" : "1px solid rgba(255,255,255,.18)", color: i === 0 ? "#f2c379" : "rgba(255,255,255,.7)", padding: "11px 16px", borderRadius: 8, fontFamily: "'Space Mono',monospace", fontVariantNumeric: "tabular-nums", fontSize: 12, cursor: "pointer" } }, a.label))))) : (react_1.default.createElement("button", { onClick: () => { if (annonceMajeure)
+                    setAnnonceMajeure(null);
+                else
+                    setCalAlert(null); }, style: { background: "rgba(255,220,50,.15)", border: "1px solid rgba(255,220,50,.4)", color: "#f2c379", padding: "11px 28px", borderRadius: 8, fontFamily: "'Bebas Neue',cursive", fontSize: 16, letterSpacing: 3, cursor: "pointer" } }, calAff.majeur ? "J'AI LU" : "OK"))))) : null;
     const EndingOv = ending ? (react_1.default.createElement("div", { style: { position: "fixed", inset: 0, zIndex: 400, background: "#000", overflowY: "auto", padding: "40px 20px", display: "flex", alignItems: "center", justifyContent: "center" } },
         react_1.default.createElement("div", { style: { position: "fixed", inset: 0, background: "linear-gradient(180deg,#000 0%,#060a14 45%,#0a1424 100%)", animation: "overlayIn 1.6s ease both", pointerEvents: "none" } }),
         [...Array(30)].map((_, i) => (react_1.default.createElement("div", { key: i, style: { position: "fixed", left: `${(i * 37) % 100}%`, top: `${(i * 23) % 80}%`, width: 1.6, height: 1.6, borderRadius: "50%",
