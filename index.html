@@ -8256,6 +8256,26 @@ const RESERVES_SCENARIO = new Set(["anok_yai"]);
 // Les gens dont la vie privée te concerne vraiment. Le cercle n'en fait pas
 // partie : être riche et connu ne fait pas de quelqu'un un proche.
 const PROCHES_FIXES = new Set(["weeknd", "the_weeknd", "drake", "falltos", "jack_grealish"]);
+// Les missions qui visent tes propres enfants parlent de l'aîné en âge d'être
+// approché. Les textes s'accordent à son sexe : rien n'est écrit en dur.
+function enfantVise(gs, ageMin, ageMax) {
+    const l = (gs && gs.children) || [];
+    for (let i = 0; i < l.length; i++) {
+        const c = l[i];
+        if (!c || !c.born)
+            continue;
+        const a = yearsElapsed(gs.currentDate, c.born);
+        if (a >= ageMin && a < ageMax)
+            return { ...c, idx: i, age: a };
+    }
+    return null;
+}
+function motsEnfant(c) {
+    const f = c && c.sex === "f";
+    return { nom: (c && c.name) || "ton enfant", il: f ? "elle" : "il", lui: f ? "elle" : "lui",
+        le: f ? "la" : "le", un: f ? "une" : "un", e: f ? "e" : "", fils: f ? "fille" : "fils",
+        petit: f ? "petite" : "petit" };
+}
 function estUnProche(gs, id) {
     if (!gs || !id)
         return false;
@@ -11549,6 +11569,58 @@ const WAR_MISSIONS = [
         loseT: "Falltos est mort",
         loseD: "Accident de la route, une nuit, sur une départementale qu'il prenait trois fois par semaine depuis vingt ans.\n\nPas de témoin. Pas d'autre véhicule retrouvé. Enquête close en neuf jours.\n\nÀ l'enterrement, il y avait les sept personnes de son groupe d'étude biblique, et toi. Quelqu'un a lu Jérémie 29:13 — le verset qu'il t'avait montré le premier soir.\n\nC'est lui qui t'a sorti de là. Et c'est pour ça qu'ils l'ont tué.",
         winFx: { rep: +14, stress: +25 }, loseFx: { rep: -8, stress: +100, health: -25 }, killFalltos: true },
+    // Les deux fils de Falltos, et le cercle qui vient les chercher. Ces missions
+    // ne sont jamais tirées au sort : elles arrivent à l'âge où ça se joue, et
+    // seulement si tu es dans la résistance. `scenario` les sort du tirage.
+    { id: "wm_dario", emoji: "⚽️", title: "Ils approchent le fils de Falltos", scenario: true,
+        days: 38, chance: 0.9, cost: 9000000, critical: true,
+        brief: "Dario Falletta a dix-sept ans, un pied gauche que toute l'Europe regarde, et depuis trois semaines des gens très bien habillés autour de lui.\n\nUn conseiller en image, un avocat, une invitation à un dîner privé qu'un garçon de son âge ne refuse pas.\n\nTu connais ce dîner. Tu sais ce qu'on y signe sans le savoir.",
+        goal: "Lui parler avant qu'il n'y aille",
+        winT: "Dario n'ira pas",
+        winD: "Tu ne lui as pas fait la morale. Tu lui as raconté ce que tu avais vu, toi, dans ces pièces-là — ce qu'on y demande, et le moment où il est trop tard pour dire non.\n\nIl a écouté sans t'interrompre. À la fin il a dit : « Mon père m'a dit exactement la même chose. »\n\nIl a annulé le dîner par message. Deux lignes, sans explication. Ils n'ont pas insisté : un garçon de dix-sept ans qui dit non proprement, ça ne se force pas sans faire du bruit.",
+        loseT: "Il n'a pas voulu t'écouter",
+        loseD: "Il a été poli, et il n'a rien entendu. À dix-sept ans, un homme de quarante ans qui t'explique le monde, c'est du bruit.\n\nTu as passé la nuit à chercher un autre angle. Tu n'en as pas trouvé.\n\nC'est Falltos qui l'a eu. Pas avec des arguments non plus — il l'a emmené voir où lui avait grandi, et il lui a dit ce qu'il avait refusé, à l'époque, et ce que ça lui avait coûté.\n\nDario n'est pas allé au dîner. Trois mois plus tard, il s'est fait baptiser, dans la même eau que son père. Tu n'étais pas prévenu — tu l'as appris comme tout le monde.",
+        winFx: { rep: +12, rel: { falltos: +10 } }, loseFx: { stress: +18, rel: { falltos: +6 } }, evLoss: 0 },
+    { id: "wm_alpha", emoji: "✂️", title: "Ils approchent le cadet", scenario: true,
+        days: 42, chance: 0.38, cost: 14000000, critical: true,
+        brief: "Alpha Falletta Yai a vingt-cinq ans, un diplôme, aucun contrat, et une ambition qui ne se cache même pas.\n\nOn lui a fait visiter des ateliers où on n'entre pas sans parrainage. On lui a présenté des gens qui décident des nominations avant que les maisons en soient informées.\n\nSon frère a dit non à seize ans. Celui-là n'est pas son frère.",
+        goal: "Le détourner du cercle",
+        winT: "Il prend ses distances",
+        winD: "Il t'a écouté, et il a reculé.",
+        loseT: "Alpha a signé",
+        loseD: "Il t'a laissé parler jusqu'au bout, et il a souri comme on sourit à quelqu'un qui n'a pas compris l'époque.\n\n« Toi tu as choisi de te battre. Moi je choisis de travailler. »\n\nIl est entré, et il n'a rien eu à trahir pour ça : c'est bien ce qui rend la chose difficile à combattre.\n\nFalltos l'a appris par la presse. Il n'a pas appelé, et son fils n'a pas appelé non plus. À ta connaissance, ils ne se sont plus parlé depuis.",
+        winFx: { rep: +10 }, loseFx: { stress: +26, rel: { falltos: -4 } }, evLoss: 0, truque: "perdu" },
+    // Le cercle ne s'arrête pas aux enfants de Falltos. Les tiens ont le même âge,
+    // et bien plus d'intérêt à leurs yeux : ils portent ton nom.
+    { id: "wm_mon_enfant", emoji: "🚪", title: "Ils viennent chercher le tien", scenario: true,
+        needChild: true, days: 35, chance: 0.58, cost: 13000000, critical: true,
+        brief: "{nom} a dix-sept ans — l'âge où on écoute n'importe qui plutôt que ses parents.\n\nUn conseiller en orientation qui n'en est pas un, un stage dans une fondation qui n'existe que sur le papier, une invitation à un week-end où il n'y aura aucun autre adolescent.\n\nIls ne cherchent pas à te faire mal. Ils cherchent quelqu'un qui porte ton nom et qui leur doit quelque chose.",
+        goal: "Arriver avant eux",
+        winT: "Tu as été entendu",
+        winD: "Tu n'as pas interdit, tu as raconté. Ce que tu as vu, ce qu'on t'a demandé, et le jour où tu as compris que tu ne pouvais plus sortir seul.\n\nÀ la fin, une seule question : « Et si tu avais dit oui, j'existerais quand même ? »\n\nLe week-end a été décliné sans explication. Vous n'en avez jamais reparlé, et quelque chose a changé entre vous — en mieux.",
+        loseT: "Tu es arrivé trop tard",
+        loseD: "Ils avaient six mois d'avance et un argument que tu n'avais pas : eux proposaient un avenir, toi un combat.\n\nLe week-end a eu lieu. Il y en a eu d'autres. Les appels se sont espacés, les réponses ont raccourci, et un jour tu as appris par quelqu'un d'autre où {nom} travaillait désormais.\n\nTu n'as rien perdu d'un coup. C'est ce qui rend la chose difficile à raconter.",
+        winFx: { rep: +10, stress: +12 }, loseFx: { rep: -8, stress: +46, health: -8 },
+        winMental: { purpose: +10 }, loseMental: { purpose: -18, loneliness: +22 }, evLoss: 0 },
+    { id: "wm_mon_enfant2", emoji: "🪜", title: "La carrière offerte", scenario: true,
+        needChild: true, days: 40, chance: 0.5, cost: 16000000, critical: true,
+        brief: "{nom} a vingt-cinq ans, un diplôme, et une porte qui s'ouvre sans qu'on ait frappé.\n\nLe poste existe vraiment. Le salaire aussi. La seule chose qui ne figure pas dans le contrat, c'est pourquoi on l'a choisi.\n\nTu connais la réponse. Elle tient en un nom de famille.",
+        goal: "Le dire sans tout casser",
+        winT: "Le raccourci est refusé",
+        winD: "Tu n'as pas dit « refuse ». Tu as dit : « Prends-le si tu veux. Mais sache ce que tu signes, et ne me demande pas de faire semblant. »\n\nLe poste a été décliné. Trois ans plus tard, {nom} en a trouvé un autre, moins bien payé, obtenu sans personne.\n\nTu n'as jamais été remercié. Il n'y avait pas à l'être.",
+        loseT: "Le poste est pris",
+        loseD: "« Toi tu as eu le luxe de pouvoir refuser. »\n\nC'était vrai, et c'est bien ce qui t'a fait taire.\n\nLe poste a été pris. Vous vous parlez encore, poliment, aux anniversaires. Il y a juste un sujet que vous n'abordez jamais, et c'est le seul qui compte.",
+        winFx: { rep: +8 }, loseFx: { stress: +32, rep: -5 },
+        winMental: { purpose: +8 }, loseMental: { purpose: -12, loneliness: +14 }, evLoss: 0 },
+    { id: "wm_dalia", emoji: "📱", title: "Le contrat de la petite dernière", scenario: true,
+        days: 30, chance: 0.55, cost: 11000000, critical: true,
+        brief: "Dalia Falletta Yai a seize ans et une audience que ni Prada ni l'Atlético ne peuvent acheter : elle, on la regarde par choix.\n\nUne marque qu'elle n'a jamais démarchée lui propose trois ans de partenariat. Le contrat est propre, le montant est indécent, et l'agence qui le porte appartient à quatre sociétés qui finissent toutes au même endroit.\n\nIls n'achètent pas son image. Ils achètent un public qu'ils n'atteignent plus.",
+        goal: "La convaincre de refuser",
+        winT: "Elle a refusé",
+        winD: "Tu ne lui as pas dit de refuser. Tu lui as montré à qui appartenait l'agence, les quatre sociétés, et le nom qui revient à la fin — et tu l'as laissée lire jusqu'au bout.\n\nElle a posé le téléphone et elle a dit : « Ils me prennent pour qui, exactement ? »\n\nElle a refusé par mail, en deux lignes, et elle n'a jamais expliqué publiquement pourquoi. À seize ans, elle a compris quelque chose que des gens de cinquante ans n'ont jamais voulu voir.",
+        loseT: "Elle a signé",
+        loseD: "Tu es arrivé avec un dossier, et elle a vu un adulte de plus qui voulait décider à sa place. Elle a signé le lendemain.\n\nPendant trois ans, elle portera leurs mots sans jamais savoir qu'elle les porte, devant un public qui n'aurait écouté personne d'autre.\n\nElle n'est pas des leurs, et elle ne le sera jamais. C'est précisément ce qui les intéresse.",
+        winFx: { rep: +11, rel: { falltos: +8 } }, loseFx: { stress: +24, rep: -6 }, loseOpinion: -8, evLoss: 0 },
     { id: "wm_church", emoji: "⛪", title: "L'association de Falltos", days: 40, chance: 0.52, cost: 12000000,
         brief: "L'association qui héberge son groupe d'étude est visée par une dissolution administrative. Motif : trouble à l'ordre public.",
         goal: "Empêcher la dissolution",
@@ -16073,11 +16145,14 @@ const DARIO_AN = 365.25 * 86400000;
 // l'ordre tient même quand un saut de temps en rend plusieurs exigibles.
 function jalonsFalletta(gs) {
     const d = gs.dario, a = gs.alpha, f = gs.filleF, AN = DARIO_AN, L = [];
-    if (gs.anokAt && !d)
+    // Un mort n'a pas d'autre enfant : les naissances s'arrêtent avec lui, mais
+    // les enfants déjà nés continuent leur vie.
+    const vivant = !((gs.deceased || []).includes("falltos") || (gs.erased || []).includes("falltos"));
+    if (vivant && gs.anokAt && !d)
         L.push(["naissance", gs.anokAt + 2 * AN]);
-    if (d && !a)
+    if (vivant && d && !a)
         L.push(["alpha", d.birth + 3 * AN]);
-    if (a && !f)
+    if (vivant && a && !f)
         L.push(["fille", a.birth + 6 * AN]);
     if (d && !d.debut)
         L.push(["nice", d.birth + 16 * AN]);
@@ -16085,6 +16160,12 @@ function jalonsFalletta(gs) {
         L.push(["atletico", d.birth + 19 * AN]);
     if (f && !f.debut)
         L.push(["creatrice", f.birth + 14 * AN]);
+    // Hors résistance, personne ne va lui parler : il entre dans le cercle à
+    // vingt-cinq ans sans que la question se pose.
+    if (a && !a.elites && !gs.inResistance)
+        L.push(["alpha_cercle", a.birth + 25 * AN]);
+    if (f && f.debut && !f.contrat && !gs.inResistance)
+        L.push(["dalia_contrat", f.birth + 16 * AN]);
     if (a && !a.etape)
         L.push(["diplome", a.birth + 24 * AN]);
     if (a && a.etape === "diplome")
@@ -19636,7 +19717,7 @@ const INIT = {
     rlM6: null, detteVue: 0, bienFaits: [], bienVu: 0, marche: null, bonnePart: false, dime: false, falltosVus: [], naelVus: [], marcheActs: {}, marcheJour: null, marcheVu: null, tentations: [], temoignages: [], publicFidele: 0, nael: null, eliteSince: null, membreDepuis: null, grossesseCercle: null, enfantLivre: null, enfantRevu: false, sacrifices: [], warMission: null, warMissionsDone: [], docLeaked: false, eliteInfluence: 0, favorsUsed: [], circleNews: [], evidence: 0, exposure: 0, activeOps: [], pendingCM: null, cmDone: [], activeOp: null, opsDone: [], targetExposure: {}, exposedTargets: [],
     allyState: { falltos: "actif", kanye_west: "actif", candace_owens: "actif", alain_soral: "actif", dieudonne: "actif", ryan_garcia: "actif", justin_bieber: "absent", the_weeknd: "absent" },
     inResistance: false, awardsBanned: false, conspiracist: false, tutorialDone: false, baptismDate: null, faithStart: null, faithStage: 0, faithDone: false, exElite: false,
-    anokPlan: null, anokAt: null, dario: null, alpha: null, filleF: null, npcKids: [], warrant: null, mourning: false, mourningTold: false, boughtGrammys: [], lawShield: false, openCountries: [], mediaCycle: null, kaineEnded: null, eliteMet: [], newElites: {}, lastRecruitYear: null, curiaNames: null, curiaUntil: null, mkStage: {}, mkActive: null, mkFails: [], mkDone: {}, sacrificesDone: [], festivalDisaster: null, sabotaged: [], erased: [], seatsPlaced: [], lawsPassed: [], exitStrikes: [], resistanceTried: false, resistDeclinedAt: null, musicTier: null, musicOn: true, falltosSacrificed: false, lastFalltosOffer: null, eliteService: 0, rankSeen: null, eliteMission: null, eliteMissionsDone: [], circleOp: null, circleOpsDone: [], circleOpsFailed: [], lastCircleOpAt: null, eliteEndDone: false, lastEliteOffer: null, eliteOfferAt: null, eliteRefused: false, pendingDeath: null, elite: false, eliteOffered: false, eliteStrikes: 0, eliteFallen: false, hits: [], postStreaming: null, lastSummerHitYear: null, mentalAspects: { anxiety: 22, burnout: 18, loneliness: 25, purpose: 78 }, therapy: null, addictions: [], stis: [], unsafeActs: 0, lastStiCheck: null, stiTested: null,
+    anokPlan: null, anokAt: null, dario: null, alpha: null, filleF: null, enfantCercle: [], npcKids: [], warrant: null, mourning: false, mourningTold: false, boughtGrammys: [], lawShield: false, openCountries: [], mediaCycle: null, kaineEnded: null, eliteMet: [], newElites: {}, lastRecruitYear: null, curiaNames: null, curiaUntil: null, mkStage: {}, mkActive: null, mkFails: [], mkDone: {}, sacrificesDone: [], festivalDisaster: null, sabotaged: [], erased: [], seatsPlaced: [], lawsPassed: [], exitStrikes: [], resistanceTried: false, resistDeclinedAt: null, musicTier: null, musicOn: true, falltosSacrificed: false, lastFalltosOffer: null, eliteService: 0, rankSeen: null, eliteMission: null, eliteMissionsDone: [], circleOp: null, circleOpsDone: [], circleOpsFailed: [], lastCircleOpAt: null, eliteEndDone: false, lastEliteOffer: null, eliteOfferAt: null, eliteRefused: false, pendingDeath: null, elite: false, eliteOffered: false, eliteStrikes: 0, eliteFallen: false, hits: [], postStreaming: null, lastSummerHitYear: null, mentalAspects: { anxiety: 22, burnout: 18, loneliness: 25, purpose: 78 }, therapy: null, addictions: [], stis: [], unsafeActs: 0, lastStiCheck: null, stiTested: null,
     reissues: [], endedRuns: null, atoneLog: [], pendingLeak: null, betrayals: [], industryEra: null, eraIndex: 0, eraAdapted: [], secrets: [], secretThreat: null,
     objectives: [], objectivesDone: [], timeline: [], grief: null, callbacks: [],
     healthAspects: { voice: 88, body: 85, sleep: 80, mind: 82 },
@@ -19806,7 +19887,7 @@ function capFame(next) {
 // s'en approcher.
 // Affichée dans les paramètres : elle dit d'un coup d'œil si la partie tourne
 // bien sur la dernière version du jeu.
-const VERSION_JEU = "111";
+const VERSION_JEU = "113";
 // Le seuil à partir duquel une fortune commence à se défendre au lieu de croître
 const SEUIL_GRANDE_FORTUNE = 3000000000;
 const TAUX_FROTTEMENT = 0.34; // par an sur la part au-dessus du seuil, et ça s'accélère
@@ -21140,6 +21221,8 @@ function gameReducerInner(state, action) {
             return { ...state, anokAt: action.at };
         case "DARIO_SET":
             return { ...state, dario: action.dario };
+        case "ENFANT_CERCLE":
+            return { ...state, enfantCercle: [...(state.enfantCercle || []), state.currentDate] };
         case "ALPHA_SET":
             return { ...state, alpha: action.alpha };
         case "FILLE_SET":
@@ -24786,6 +24869,8 @@ function FiscoGame() {
             const avail = m => {
                 if (m.first || m.id === "wm_bieber" || m.id === "wm_weeknd")
                     return false;
+                if (m.scenario)
+                    return false; // déclenchées par l'âge des enfants, pas au hasard
                 if (m.ally && (gs.allyState || {})[m.ally] !== "actif")
                     return false;
                 if (m.needChild && !(gs.children || []).length)
@@ -24814,12 +24899,44 @@ function FiscoGame() {
                 && !(gs.deceased || []).includes("falltos")) {
                 pick = WAR_MISSIONS.find(m => m.id === "wm_falltos");
             }
+            // Le cercle vient chercher les fils de Falltos. Rien d'aléatoire ici.
+            else if (!log.wm_dario && gs.dario && gs.dario.debut && !gs.dario.elites
+                && !(gs.deceased || []).includes("falltos")
+                && yearsElapsed(gs.currentDate, gs.dario.birth) >= 17
+                && yearsElapsed(gs.currentDate, gs.dario.birth) < 19) {
+                pick = WAR_MISSIONS.find(m => m.id === "wm_dario");
+            }
+            // Tes propres enfants, aux mêmes âges que ceux de Falltos.
+            else if (!log.wm_mon_enfant && enfantVise(gs, 17, 19) && !(gs.enfantCercle || []).length) {
+                pick = WAR_MISSIONS.find(m => m.id === "wm_mon_enfant");
+            }
+            else if (!log.wm_mon_enfant2 && enfantVise(gs, 25, 27)) {
+                pick = WAR_MISSIONS.find(m => m.id === "wm_mon_enfant2");
+            }
+            else if (!log.wm_dalia && gs.filleF && gs.filleF.debut && !gs.filleF.contrat
+                && yearsElapsed(gs.currentDate, gs.filleF.birth) >= 16
+                && yearsElapsed(gs.currentDate, gs.filleF.birth) < 18) {
+                pick = WAR_MISSIONS.find(m => m.id === "wm_dalia");
+            }
+            else if (!log.wm_alpha && gs.alpha && !gs.alpha.elites
+                && yearsElapsed(gs.currentDate, gs.alpha.birth) >= 25
+                && yearsElapsed(gs.currentDate, gs.alpha.birth) < 26) {
+                pick = WAR_MISSIONS.find(m => m.id === "wm_alpha");
+            }
             else if (d.getDate() % 17 === 0 && Math.random() < 0.2) {
                 // Priorité aux missions jamais vécues, puis aux plus anciennes
                 const fresh = WAR_MISSIONS.filter(m => avail(m) && !log[m.id]);
                 const pool = fresh.length ? fresh : WAR_MISSIONS.filter(avail).sort((a, b) => (log[a.id] || 0) - (log[b.id] || 0)).slice(0, 8);
                 if (pool.length)
                     pick = pool[Math.floor(Math.random() * pool.length)];
+            }
+            // Les missions qui visent tes enfants portent le prénom du tien.
+            if (pick && /^wm_mon_enfant/.test(pick.id)) {
+                const c = enfantVise(gs, pick.id === "wm_mon_enfant" ? 17 : 25, pick.id === "wm_mon_enfant" ? 19 : 27);
+                const nom = (c && c.name) || "ton enfant";
+                const sub = t => typeof t === "string" ? t.replace(/\{nom\}/g, nom) : t;
+                pick = { ...pick, brief: sub(pick.brief), goal: sub(pick.goal),
+                    winT: sub(pick.winT), winD: sub(pick.winD), loseT: sub(pick.loseT), loseD: sub(pick.loseD) };
             }
             if (pick) {
                 dispatch({ type: "SET_WAR_MISSION", mission: pick });
@@ -24833,8 +24950,13 @@ function FiscoGame() {
             // S'engager vraiment double presque les chances ; ne rien faire les divise
             const eng = m.engaged;
             const allyBoost = m.ally && (gs.allyState || {})[m.ally] === "actif" ? 0.06 : 0;
-            const p = (eng ? m.chance : m.chance * 0.35) + allyBoost + Math.min(0.12, (gs.evidence || 0) / 900);
-            const win = Math.random() < p;
+            // Les missions scénarisées gardent la chance annoncée : le dossier
+            // accumulé ne change rien à une conversation avec un gamin de dix-sept ans.
+            const bonusPreuves = m.scenario ? 0 : Math.min(0.12, (gs.evidence || 0) / 900);
+            const p = (eng ? m.chance : m.chance * 0.35) + allyBoost + bonusPreuves;
+            // Une mission marquée « truquée » a une issue écrite : le joueur ne le sait
+            // pas, l'écran de mission affiche une chance comme les autres.
+            const win = m.truque ? (m.truque === "gagne") : (Math.random() < p);
             dispatch({ type: "RESOLVE_WAR_MISSION", id: m.id,
                 loseAlly: win ? null : m.loseAlly, winAlly: win ? m.winAlly : null,
                 evLoss: win ? 0 : (m.evLoss || 0), loseFlag: win ? null : m.loseFlag,
@@ -24849,6 +24971,42 @@ function FiscoGame() {
             const dop = win ? (m.winOpinion || 0) : (m.loseOpinion || 0);
             if (dop)
                 dispatch({ type: "OPINION", delta: dop });
+            // Dario ne rejoint le cercle dans aucun cas : gagné, c'est toi ; perdu,
+            // c'est son père. Alpha, lui, entre — et ne parle plus à Falltos.
+            if (m.id === "wm_dario" && gs.dario) {
+                dispatch({ type: "DARIO_SET", dario: { ...gs.dario, elites: "refuse", bapteme: !win } });
+                if (!win) {
+                    addLog("[FOI] Dario Falletta s'est fait baptiser");
+                    dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "✝️",
+                            title: "Dario Falletta refuse le cercle et se fait baptiser" } });
+                }
+                else {
+                    dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🚫",
+                            title: "Dario Falletta refuse le cercle" } });
+                }
+            }
+            if (m.id === "wm_mon_enfant" && !win) {
+                dispatch({ type: "ENFANT_CERCLE" });
+                addLog("[CERCLE] Ton enfant est passé de l'autre côté");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "famille", emoji: "🚪",
+                        title: "Ton enfant a rejoint le cercle" } });
+            }
+            if (m.id === "wm_dalia" && gs.filleF) {
+                dispatch({ type: "FILLE_SET", fille: { ...gs.filleF, contrat: win ? "refuse" : "signe" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: win ? "🚫" : "📄",
+                        title: win ? "Dalia Falletta Yai refuse le contrat du cercle"
+                            : "Dalia Falletta Yai signe sans savoir pour qui" } });
+                addLog(win ? "[CERCLE] Dalia Falletta Yai a refusé le contrat"
+                    : "[CERCLE] Dalia Falletta Yai a signé le partenariat");
+            }
+            if (m.id === "wm_alpha" && gs.alpha) {
+                dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, elites: win ? "refuse" : "rejoint", rompu: !win } });
+                if (!win) {
+                    addLog("[CERCLE] Alpha Falletta Yai rejoint le cercle — rupture avec Falltos");
+                    dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🕳️",
+                            title: "Alpha Falletta Yai rejoint le cercle" } });
+                }
+            }
             if (win && m.bien)
                 dispatch({ type: "BIEN_FAIT", id: m.id, poids: m.bien });
             if (!win && m.loseToElite) {
@@ -25132,25 +25290,25 @@ function FiscoGame() {
                     desc: `Un garçon. **Dario Falletta** — le nom de famille que Falltos n'utilise jamais sur scène, et qu'il donne pourtant à son fils.\n\nAnok Yai et lui ne diront rien de plus que ça.\n\nDans seize ans, ce gamin commencera sa propre carrière. Rien ne dit qu'elle aura à voir avec la musique.` });
             }
             else if (jalon === "alpha") {
-                dispatch({ type: "NPC_BIRTH", kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode",
+                dispatch({ type: "NPC_BIRTH", kid: { id: "alpha_falletta", name: "Alpha Falletta Yai", emoji: "✂️", cat: "mode",
                         loc: "Paris", parentId: "falltos", parentName: "Falltos", birth: gs.currentDate,
                         sex: "m", careerLabel: "Créateur de mode", dario: true } });
                 dispatch({ type: "ALPHA_SET", alpha: { birth: gs.currentDate, etape: null } });
-                addLog("[NAISSANCE] Alpha Falletta, deuxième fils de Falltos et Anok Yai");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: "Naissance d'Alpha Falletta" } });
+                addLog("[NAISSANCE] Alpha Falletta Yai, deuxième fils de Falltos et Anok Yai");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: "Naissance d'Alpha Falletta Yai" } });
                 setCalAlert({ emoji: "👶", title: "Un deuxième fils", majeur: true,
-                    desc: `Trois ans après Dario, **Alpha Falletta**.\n\nAnok Yai a posté une photo de deux petites mains, rien d'autre. Falltos n'a rien dit du tout.` });
+                    desc: `Trois ans après Dario, **Alpha Falletta Yai**.\n\nAnok Yai a posté une photo de deux petites mains, rien d'autre. Falltos n'a rien dit du tout.` });
             }
             else if (jalon === "fille") {
                 const prenom = "Dalia"; // la petite dernière a son prénom, pas un tirage
-                dispatch({ type: "NPC_BIRTH", kid: { id: "fille_falletta", name: `${prenom} Falletta`, emoji: "📱", cat: "influencer",
+                dispatch({ type: "NPC_BIRTH", kid: { id: "fille_falletta", name: `${prenom} Falletta Yai`, emoji: "📱", cat: "influencer",
                         loc: "Paris", parentId: "falltos", parentName: "Falltos", birth: gs.currentDate,
                         sex: "f", careerLabel: "Créatrice de contenu", dario: true } });
                 dispatch({ type: "FILLE_SET", fille: { birth: gs.currentDate, prenom, debut: null } });
-                addLog(`[NAISSANCE] ${prenom} Falletta, fille de Falltos et Anok Yai`);
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: `Naissance de ${prenom} Falletta` } });
+                addLog(`[NAISSANCE] ${prenom} Falletta Yai, fille de Falltos et Anok Yai`);
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "👶", title: `Naissance de ${prenom} Falletta Yai` } });
                 setCalAlert({ emoji: "👶", title: "Une fille, Dalia", majeur: true,
-                    desc: `Six ans après Alpha, Anok Yai et Falltos ont une fille : **${prenom} Falletta**.\n\nTroisième et dernier enfant. Falltos a dit une seule phrase là-dessus, et c'était pour demander qu'on les laisse tranquilles.` });
+                    desc: `Six ans après Alpha, Anok Yai et Falltos ont une fille : **${prenom} Falletta Yai**.\n\nTroisième et dernier enfant. Falltos a dit une seule phrase là-dessus, et c'était pour demander qu'on les laisse tranquilles.` });
             }
             else if (jalon === "nice") {
                 dispatch({ type: "NPC_KID_DEBUT", id: "dario_falletta",
@@ -25173,7 +25331,7 @@ function FiscoGame() {
                     desc: `Dix-neuf ans, trois saisons à Nice, et un transfert qui ne surprend personne : **Dario Falletta rejoint l'Atlético Madrid**.\n\nIl y restera. Ce n'est pas une promesse de communicant — c'est ce qui finira par arriver : il fera toute sa carrière là-bas, et il y raccrochera.\n\nSon père n'était jamais venu voir un match. Il était dans les tribunes pour celui-là.` });
             }
             else if (jalon === "creatrice") {
-                const nomF = `${gs.filleF.prenom} Falletta`;
+                const nomF = `${gs.filleF.prenom} Falletta Yai`;
                 dispatch({ type: "NPC_KID_DEBUT", id: "fille_falletta",
                     kid: { id: "fille_falletta", name: nomF, emoji: "📱", cat: "influencer", loc: "Paris",
                         bio: "Créatrice de contenu très suivie · fille de Falltos et Anok Yai." } });
@@ -25183,10 +25341,26 @@ function FiscoGame() {
                 setCalAlert({ emoji: "📱", title: "La fille de Falltos perce", majeur: true,
                     desc: `Quatorze ans, et **${nomF}** compte déjà des millions d'abonnés.\n\nTout le monde sait de qui elle est la fille, et ça n'explique pas grand-chose : elle a trouvé son public toute seule, avec des codes que son père ne comprend pas.` });
             }
+            else if (jalon === "dalia_contrat") {
+                dispatch({ type: "FILLE_SET", fille: { ...gs.filleF, contrat: "signe" } });
+                addLog("[CERCLE] Dalia Falletta Yai a signé le partenariat");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "📄",
+                        title: "Dalia Falletta Yai signe sans savoir pour qui" } });
+                setCalAlert({ emoji: "📄", title: "Trois ans de partenariat", majeur: true,
+                    desc: `Seize ans, et **Dalia Falletta Yai** signe le plus gros contrat de sa courte vie.\n\nL'agence qui le porte appartient à quatre sociétés qui finissent toutes au même endroit. Personne ne le lui a dit — toi non plus, tu ne l'as pas vu passer.\n\nPendant trois ans, elle portera leurs mots sans savoir qu'elle les porte. Elle n'est pas des leurs, et elle ne le sera jamais : c'est précisément ce qui les intéresse.` });
+            }
+            else if (jalon === "alpha_cercle") {
+                dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, elites: "rejoint", rompu: true } });
+                addLog("[CERCLE] Alpha Falletta Yai rejoint le cercle — rupture avec Falltos");
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🕳️",
+                        title: "Alpha Falletta Yai rejoint le cercle" } });
+                setCalAlert({ emoji: "🕳️", title: "Le cadet a choisi l'autre camp", majeur: true,
+                    desc: `Vingt-cinq ans, et **Alpha Falletta Yai** est entré dans le cercle.\n\nPersonne ne l'a mis en garde. Son frère avait dit non à seize ans ; celui-là n'a pas eu la même conversation, et personne n'était là pour la lui faire.\n\nFalltos l'a appris par la presse. Il n'a pas appelé, et son fils n'a pas appelé non plus. Ils ne se parlent plus.` });
+            }
             else if (jalon === "diplome") {
                 dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, etape: "diplome" } });
                 dispatch({ type: "NPC_KID_DEBUT", id: "alpha_falletta",
-                    kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode", loc: "Paris",
+                    kid: { id: "alpha_falletta", name: "Alpha Falletta Yai", emoji: "✂️", cat: "mode", loc: "Paris",
                         bio: "Jeune créateur de mode · fils de Falltos et Anok Yai." } });
                 addLog("[MODE] Alpha Falletta sort diplômé");
                 dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🎓", title: "Alpha Falletta sort diplômé en mode" } });
@@ -25196,22 +25370,22 @@ function FiscoGame() {
             else if (jalon === "prada") {
                 dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, etape: "prada" } });
                 dispatch({ type: "NPC_KID_DEBUT", id: "alpha_falletta",
-                    kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode", loc: "Milan",
+                    kid: { id: "alpha_falletta", name: "Alpha Falletta Yai", emoji: "✂️", cat: "mode", loc: "Milan",
                         bio: "Directeur artistique de Prada · fils de Falltos et Anok Yai." } });
                 addLog("[MODE] Alpha Falletta nommé directeur artistique de Prada");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🖤", title: "Alpha Falletta, directeur artistique de Prada" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🖤", title: "Alpha Falletta Yai, directeur artistique de Prada" } });
                 setCalAlert({ emoji: "🖤", title: "Alpha Falletta chez Prada", majeur: true,
-                    desc: `Vingt-six ans. **Alpha Falletta est nommé directeur artistique de Prada**.\n\nLa maison la plus difficile à convaincre de Milan vient de confier ses collections au fils d'un rappeur français — et personne dans le métier n'a trouvé ça absurde.` });
+                    desc: `Vingt-six ans. **Alpha Falletta Yai est nommé directeur artistique de Prada**.\n\nLa maison la plus difficile à convaincre de Milan vient de confier ses collections au fils d'un rappeur français — et personne dans le métier n'a trouvé ça absurde.${gs.alpha && gs.alpha.rompu ? "\n\nSon père n'a pas commenté. Ils ne se parlent plus depuis un an, et tout le monde dans le métier sait pourquoi." : ""}` });
             }
             else if (jalon === "balenciaga") {
                 dispatch({ type: "ALPHA_SET", alpha: { ...gs.alpha, etape: "balenciaga" } });
                 dispatch({ type: "NPC_KID_DEBUT", id: "alpha_falletta",
-                    kid: { id: "alpha_falletta", name: "Alpha Falletta", emoji: "✂️", cat: "mode", loc: "Paris",
+                    kid: { id: "alpha_falletta", name: "Alpha Falletta Yai", emoji: "✂️", cat: "mode", loc: "Paris",
                         bio: "Directeur artistique de Balenciaga · fils de Falltos et Anok Yai." } });
                 addLog("[MODE] Alpha Falletta prend la direction artistique de Balenciaga");
-                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🕶️", title: "Alpha Falletta, directeur artistique de Balenciaga" } });
+                dispatch({ type: "ADD_TIMELINE", entry: { type: "casting", emoji: "🕶️", title: "Alpha Falletta Yai, directeur artistique de Balenciaga" } });
                 setCalAlert({ emoji: "🕶️", title: "Alpha Falletta chez Balenciaga", majeur: true,
-                    desc: `Cinq ans chez Prada, et il part. À trente-deux ans, **Alpha Falletta prend la direction artistique de Balenciaga**.\n\nSon père a mis vingt ans à faire admettre qu'il était un artiste. Son fils n'a eu à le démontrer à personne.` });
+                    desc: `Cinq ans chez Prada, et il part. À trente-deux ans, **Alpha Falletta Yai prend la direction artistique de Balenciaga**.\n\nSon père a mis vingt ans à faire admettre qu'il était un artiste. Son fils n'a eu à le démontrer à personne.${gs.alpha && gs.alpha.rompu ? "\n\nIls ne se sont toujours pas reparlé." : ""}` });
             }
         }
         // ── Le casting fait des enfants ──
@@ -28625,7 +28799,7 @@ function FiscoGame() {
             }
             const quoi = { couple: "l'annonce de Falltos et Anok Yai",
                 naissance: "la naissance de Dario Falletta",
-                alpha: "la naissance d'Alpha Falletta",
+                alpha: "la naissance d'Alpha Falletta Yai",
                 fille: "la naissance de Dalia Falletta",
                 nice: "les seize ans de Dario, et l'OGC Nice",
                 atletico: "ses dix-neuf ans, et l'Atlético Madrid",
